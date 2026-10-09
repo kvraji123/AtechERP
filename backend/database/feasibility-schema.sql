@@ -1,0 +1,147 @@
+CREATE TABLE IF NOT EXISTS marketing_feasibilities (
+  feasibility_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  feasibility_date DATE NOT NULL,
+  communication_address TEXT NULL,
+  contact_person VARCHAR(200) NULL,
+  telephone_number VARCHAR(50) NULL,
+  fax_number VARCHAR(50) NULL,
+  email_address VARCHAR(200) NULL,
+  is_new_customer VARCHAR(3) NULL,
+  existing_products_details TEXT NULL,
+  similar_product_processing VARCHAR(3) NULL,
+  similar_product_details TEXT NULL,
+  drawing_reviewed_completely VARCHAR(3) NULL,
+  drawing_requirements_understood VARCHAR(3) NULL,
+  customer_clarification_required TEXT NULL,
+  product_technically_feasible VARCHAR(3) NULL,
+  raw_material_source VARCHAR(20) NULL,
+  purchase_source_available VARCHAR(3) NULL,
+  material_source_details TEXT NULL,
+  outsource_process_required VARCHAR(3) NULL,
+  outsource_source_details TEXT NULL,
+  tolerance_achievable VARCHAR(3) NULL,
+  acceptance_criteria_understood VARCHAR(3) NULL,
+  customer_special_characteristics VARCHAR(3) NULL,
+  special_characteristics_details TEXT NULL,
+  customer_final_inspection_format VARCHAR(3) NULL,
+  final_inspection_format_details TEXT NULL,
+  batch_supply_reports TEXT NULL,
+  customer_required_volume DECIMAL(14,3) NULL,
+  volume_uom VARCHAR(30) NULL,
+  statutory_requirements TEXT NULL,
+  customer_specified_packing VARCHAR(3) NULL,
+  packing_details TEXT NULL,
+  customer_specified_labelling VARCHAR(3) NULL,
+  labelling_details TEXT NULL,
+  transportation_mode VARCHAR(100) NULL,
+  customer_specified_transporter VARCHAR(3) NULL,
+  transporter_details TEXT NULL,
+  freight_paid_by VARCHAR(30) NULL,
+  payment_terms TEXT NULL,
+  feasibility_decision VARCHAR(30) NULL,
+  regret_reason TEXT NULL,
+  final_remarks TEXT NULL,
+  save_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  feasibility_check_completed_on DATETIME NULL,
+  closed_by_code VARCHAR(50) NULL,
+  closed_by_name VARCHAR(150) NULL,
+  closed_by_role VARCHAR(100) NULL,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  submitted_by VARCHAR(50) NULL,
+  submitted_on DATETIME NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (feasibility_id),
+  UNIQUE KEY uq_feasibility_enquiry_part (enquiry_part_id),
+  KEY ix_feasibility_enquiry (enquiry_id),
+  KEY ix_feasibility_status (save_status, feasibility_decision),
+  CONSTRAINT fk_feasibility_enquiry
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_feasibility_enquiry_part
+    FOREIGN KEY (enquiry_part_id) REFERENCES marketing_enquiry_parts (enquiry_part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_regret_letters (
+  regret_letter_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  feasibility_id BIGINT UNSIGNED NOT NULL,
+  letter_status VARCHAR(30) NOT NULL DEFAULT 'NOT_GENERATED',
+  regret_reason TEXT NOT NULL,
+  generated_on DATETIME NULL,
+  approved_on DATETIME NULL,
+  approved_by VARCHAR(50) NULL,
+  sent_on DATETIME NULL,
+  sent_by VARCHAR(50) NULL,
+  file_path VARCHAR(500) NULL,
+  letter_content LONGTEXT NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (regret_letter_id),
+  UNIQUE KEY uq_regret_letter_feasibility (feasibility_id),
+  KEY ix_regret_letter_enquiry (enquiry_id),
+  CONSTRAINT fk_regret_letter_enquiry
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_regret_letter_enquiry_part
+    FOREIGN KEY (enquiry_part_id) REFERENCES marketing_enquiry_parts (enquiry_part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_regret_letter_feasibility
+    FOREIGN KEY (feasibility_id) REFERENCES marketing_feasibilities (feasibility_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_reference_values (
+  reference_value_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  reference_type VARCHAR(50) NOT NULL,
+  value_code VARCHAR(100) NOT NULL,
+  display_label VARCHAR(150) NOT NULL,
+  numeric_value DECIMAL(18,6) NULL,
+  effective_date DATE NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (reference_value_id),
+  UNIQUE KEY uq_marketing_reference_value (reference_type, value_code),
+  KEY ix_marketing_reference_active (reference_type, active_flag, sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO marketing_reference_values
+  (reference_type, value_code, display_label, sort_order)
+VALUES
+  ('TRANSPORT_MODE', 'ROAD', 'Road', 10),
+  ('TRANSPORT_MODE', 'AIR', 'Air', 20),
+  ('TRANSPORT_MODE', 'SEA', 'Sea', 30),
+  ('TRANSPORT_MODE', 'COURIER', 'Courier', 40),
+  ('TRANSPORT_MODE', 'OTHER', 'Other', 50),
+  ('PAYMENT_TERM', 'ADVANCE', 'Advance Payment', 10),
+  ('PAYMENT_TERM', 'NET_30', 'Net 30 Days', 20),
+  ('PAYMENT_TERM', 'NET_45', 'Net 45 Days', 30),
+  ('PAYMENT_TERM', 'NET_60', 'Net 60 Days', 40),
+  ('PAYMENT_TERM', 'LC', 'Letter of Credit', 50),
+  ('PAYMENT_TERM', 'OTHER', 'Other', 60),
+  ('DELIVERY_TERM', 'ATECH_STORES_FREIGHT_PAID', 'Delivery to Atech Stores - freight paid', 10),
+  ('DELIVERY_TERM', 'ATECH_STORES_FREIGHT_TO_PAY', 'Delivery to Atech Stores - freight to pay', 20),
+  ('DELIVERY_TERM', 'PROJECT_OR_CUSTOMER_SITE', 'Delivery to project / customer site', 30),
+  ('DELIVERY_TERM', 'EX_WORKS', 'Ex Works - collect from supplier', 40),
+  ('DELIVERY_TERM', 'DOOR_DELIVERY', 'Door delivery - supplier responsibility', 50),
+  ('DELIVERY_TERM', 'FOB', 'FOB', 60),
+  ('DELIVERY_TERM', 'CIF', 'CIF', 70),
+  ('DELIVERY_TERM', 'DAP', 'DAP', 80),
+  ('DELIVERY_TERM', 'DDP', 'DDP', 90),
+  ('DELIVERY_TERM', 'PARTIAL_DELIVERY_ALLOWED', 'Partial delivery permitted', 100),
+  ('DELIVERY_TERM', 'AS_PER_PO_SCHEDULE', 'Delivery as per PO schedule', 110),
+  ('DELIVERY_TERM', 'OTHER', 'Other', 120)
+ON DUPLICATE KEY UPDATE
+  display_label = VALUES(display_label),
+  sort_order = VALUES(sort_order),
+  active_flag = 'Y';

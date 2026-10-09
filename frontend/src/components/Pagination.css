@@ -1,0 +1,129 @@
+.app-pagination {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+  gap: 6px;
+  padding: 0;
+  color: #59677d;
+  font-size: 12px;
+}
+
+.app-pagination-summary {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app-pagination-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.app-pagination .app-pagination-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid #cfd8e6;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2f4160;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.app-pagination-controls button:hover:not(:disabled) {
+  border-color: #35449b;
+  background: #f5f7ff;
+  color: #35449b;
+}
+
+.app-pagination-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.app-pagination-controls button:focus-visible {
+  outline: 2px solid #35449b;
+  outline-offset: 2px;
+}
+
+/* Shared compact filter row for paginated lists. Keep controls together. */
+.app-list-toolbar.app-list-toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  min-width: 0;
+  padding: 7px 12px;
+}
+
+.app-list-toolbar.app-list-toolbar > :is(div, label, input):not(.app-pagination) {
+  flex: 1 1 220px;
+  min-width: 100px;
+  max-width: 560px;
+}
+
+.app-list-toolbar.app-list-toolbar > select {
+  flex: 1 1 130px;
+  width: auto;
+  min-width: 80px;
+  max-width: 200px;
+}
+
+.app-list-toolbar.app-list-toolbar > button {
+  flex: 0 0 auto;
+  width: auto;
+  white-space: nowrap;
+}
+
+.app-list-toolbar.app-list-toolbar > :is(input, select, button, label, .master-search-box, .purchase-search-picker),
+.app-list-toolbar.app-list-toolbar > :is(label, .master-search-box, .purchase-search-picker) input,
+.app-list-toolbar.app-list-toolbar .purchase-input-with-icon {
+  height: 32px;
+  min-height: 32px;
+}
+
+.app-list-toolbar.app-list-toolbar input {
+  min-width: 0;
+}
+
+.app-list-toolbar.app-list-toolbar > .purchase-list-head-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  max-width: none;
+}
+
+@media (max-width: 767px) {
+  .app-pagination-controls > span {
+    display: none;
+  }
+
+  .app-list-toolbar.app-list-toolbar {
+    gap: 6px;
+    overflow-x: auto;
+  }
+
+  .app-list-toolbar.app-list-toolbar > select {
+    min-width: 110px;
+  }
+
+  .app-list-toolbar.app-list-toolbar > :is(div, label, input):not(.app-pagination) {
+    min-width: 160px;
+  }
+}

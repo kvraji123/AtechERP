@@ -1,0 +1,3550 @@
+-- ============================================================================
+-- A TECH AUTOMATION ERP - PRODUCTION DATABASE CLEAN INSTALL
+-- Generated from current schemas. No test transactions are included.
+-- Target: MySQL 8.0+ / clean database installation.
+--
+-- IMPORTANT:
+--   1. Back up before importing into any existing environment.
+--   2. This file is intended for a NEW/CLEAN database.
+--   3. Change the database name below if production uses another DB_NAME.
+--   4. Review document-sequence financial year and currency rates before go-live.
+-- ============================================================================
+
+CREATE DATABASE IF NOT EXISTS `atech_erp`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+USE `atech_erp`;
+SET NAMES utf8mb4;
+SET time_zone = '+05:30';
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ============================================================================
+-- Core document sequences, Customer Master and Part Master
+-- Source: master-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS app_document_sequences (
+  sequence_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sequence_key VARCHAR(50) NOT NULL,
+  financial_year VARCHAR(10) NOT NULL,
+  prefix VARCHAR(20) NOT NULL,
+  current_number INT UNSIGNED NOT NULL DEFAULT 0,
+  number_padding TINYINT UNSIGNED NOT NULL DEFAULT 4,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (sequence_id),
+  UNIQUE KEY uq_document_sequence (sequence_key, financial_year)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS customer_master (
+  customer_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  party_type ENUM('CUSTOMER', 'SUPPLIER', 'BOTH') NOT NULL DEFAULT 'CUSTOMER',
+  customer_code VARCHAR(50) NOT NULL,
+  customer_name VARCHAR(200) NOT NULL,
+  customer_short_name VARCHAR(100) NULL,
+  plant_code VARCHAR(50) NULL,
+  billing_address TEXT NULL,
+  delivery_address TEXT NULL,
+  delivery_terms VARCHAR(500) NULL,
+  pin_code VARCHAR(20) NULL,
+  city VARCHAR(100) NULL,
+  state_name VARCHAR(100) NULL,
+  country_name VARCHAR(100) NULL,
+  gst_number VARCHAR(30) NULL,
+  pan_number VARCHAR(30) NULL,
+  mobile_number VARCHAR(30) NULL,
+  phone_number VARCHAR(30) NULL,
+  fax_number VARCHAR(30) NULL,
+  email_address VARCHAR(200) NULL,
+  website_url VARCHAR(300) NULL,
+  invoice_type VARCHAR(50) NULL,
+  contact_person_name VARCHAR(150) NULL,
+  contact_person_mobile VARCHAR(30) NULL,
+  contact_person_designation VARCHAR(100) NULL,
+  contact_person_department VARCHAR(100) NULL,
+  currency_code VARCHAR(10) NOT NULL DEFAULT 'INR',
+  account_number VARCHAR(100) NULL,
+  account_name VARCHAR(150) NULL,
+  bank_name VARCHAR(150) NULL,
+  branch_name VARCHAR(150) NULL,
+  ifsc_code VARCHAR(30) NULL,
+  pan_tan_number VARCHAR(30) NULL,
+  customer_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  deactivation_remarks VARCHAR(500) NULL,
+  other_legal_requirements TEXT NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (customer_id),
+  UNIQUE KEY uq_customer_code (customer_code),
+  KEY ix_customer_name (customer_name),
+  KEY ix_customer_active (active_flag)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS part_master (
+  part_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  part_category ENUM('MACHINING', 'ASSEMBLY') NOT NULL,
+  part_name VARCHAR(200) NOT NULL,
+  part_number VARCHAR(100) NOT NULL,
+  drawing_number VARCHAR(100) NULL,
+  drawing_revision_number VARCHAR(50) NULL,
+  drawing_revision_date DATE NULL,
+  drawing_code_mode VARCHAR(30) NOT NULL DEFAULT 'AUTO_GENERATED',
+  drawing_code VARCHAR(100) NULL,
+  material_specification VARCHAR(300) NULL,
+  part_weight DECIMAL(14,3) NULL,
+  unit_of_measurement VARCHAR(30) NULL,
+  part_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  project_name VARCHAR(200) NULL,
+  deactivation_remarks VARCHAR(500) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (part_id),
+  UNIQUE KEY uq_part_number (part_number),
+  KEY ix_part_customer (customer_id),
+  KEY ix_part_name (part_name),
+  KEY ix_part_active (active_flag),
+  CONSTRAINT fk_part_customer
+    FOREIGN KEY (customer_id) REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO app_document_sequences
+  (sequence_key, financial_year, prefix, current_number, number_padding)
+VALUES
+  ('CUSTOMER', '2026-27', 'CUS', 0, 4),
+  ('PART', '2026-27', 'PRT', 0, 4)
+ON DUPLICATE KEY UPDATE
+  prefix = VALUES(prefix),
+  number_padding = VALUES(number_padding);
+
+-- ============================================================================
+-- Item, UOM and Material masters
+-- Source: item-master-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS item_group_master (
+  item_group_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  group_code VARCHAR(10) NOT NULL,
+  group_name VARCHAR(100) NOT NULL,
+  current_number INT UNSIGNED NOT NULL DEFAULT 0,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_group_id),
+  UNIQUE KEY uq_item_group_code (group_code),
+  UNIQUE KEY uq_item_group_name (group_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_type_master (
+  item_type_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_group_id BIGINT UNSIGNED NOT NULL,
+  type_name VARCHAR(120) NOT NULL,
+  description_prefix VARCHAR(10) NOT NULL,
+  item_code_prefix VARCHAR(10) NOT NULL,
+  current_number INT UNSIGNED NOT NULL DEFAULT 0,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_type_id),
+  UNIQUE KEY uq_item_type_group_name (item_group_id, type_name),
+  UNIQUE KEY uq_item_type_code_prefix (item_group_id, item_code_prefix),
+  KEY ix_item_type_group (item_group_id),
+  CONSTRAINT fk_item_type_group FOREIGN KEY (item_group_id)
+    REFERENCES item_group_master (item_group_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS uom_master (
+  uom_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  uom_code VARCHAR(20) NOT NULL,
+  uom_name VARCHAR(100) NOT NULL,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (uom_id),
+  UNIQUE KEY uq_uom_code (uom_code),
+  UNIQUE KEY uq_uom_name (uom_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS material_master (
+  material_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  material_name VARCHAR(120) NOT NULL,
+  material_short_code VARCHAR(20) NULL,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (material_id),
+  UNIQUE KEY uq_material_name (material_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS material_grade_master (
+  material_grade_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  material_id BIGINT UNSIGNED NOT NULL,
+  grade_code VARCHAR(50) NOT NULL,
+  grade_name VARCHAR(120) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (material_grade_id),
+  UNIQUE KEY uq_material_grade (material_id, grade_code),
+  CONSTRAINT fk_material_grade_material FOREIGN KEY (material_id)
+    REFERENCES material_master(material_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_master (
+  item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_code VARCHAR(50) NOT NULL,
+  item_group_id BIGINT UNSIGNED NOT NULL,
+  item_type_id BIGINT UNSIGNED NOT NULL,
+  item_description VARCHAR(250) NOT NULL,
+  item_specification VARCHAR(1000) NULL,
+  additional_description VARCHAR(1000) NULL,
+  uom_id BIGINT UNSIGNED NOT NULL,
+  material_id BIGINT UNSIGNED NULL,
+  material_grade_id BIGINT UNSIGNED NULL,
+  inspection_required ENUM('Y', 'N') NOT NULL DEFAULT 'N',
+  hsn_code VARCHAR(20) NULL,
+  purchase_rate DECIMAL(18,2) NULL,
+  minimum_stock DECIMAL(18,3) NULL,
+  make_name VARCHAR(150) NULL,
+  model_name VARCHAR(150) NULL,
+  lead_time_days INT UNSIGNED NULL,
+  reorder_level DECIMAL(18,3) NULL,
+  maximum_stock DECIMAL(18,3) NULL,
+  storage_location VARCHAR(150) NULL,
+  shelf_life_applicable ENUM('Y','N') NOT NULL DEFAULT 'N',
+  shelf_life_days INT UNSIGNED NULL,
+  batch_tracking_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  serial_tracking_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  drawing_number VARCHAR(120) NULL,
+  drawing_revision VARCHAR(50) NULL,
+  serial_number VARCHAR(120) NULL,
+  asset_category VARCHAR(50) NULL,
+  warranty_applicable ENUM('Y','N') NOT NULL DEFAULT 'N',
+  warranty_period_months INT UNSIGNED NULL,
+  installation_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  calibration_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  calibration_frequency VARCHAR(30) NULL,
+  measurement_range VARCHAR(120) NULL,
+  least_count VARCHAR(120) NULL,
+  accuracy VARCHAR(120) NULL,
+  calibration_agency_id BIGINT UNSIGNED NULL,
+  remarks VARCHAR(1000) NULL,
+  item_status ENUM('ACTIVE', 'INACTIVE', 'OBSOLETE') NOT NULL DEFAULT 'ACTIVE',
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  deactivation_remarks VARCHAR(500) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_id),
+  UNIQUE KEY uq_item_code (item_code),
+  KEY ix_item_description (item_description),
+  KEY ix_item_group_type (item_group_id, item_type_id),
+  KEY ix_item_material (material_id),
+  KEY ix_item_material_grade (material_grade_id),
+  KEY ix_item_uom (uom_id),
+  KEY ix_item_active (active_flag),
+  CONSTRAINT fk_item_group FOREIGN KEY (item_group_id)
+    REFERENCES item_group_master (item_group_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_item_type FOREIGN KEY (item_type_id)
+    REFERENCES item_type_master (item_type_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_item_uom FOREIGN KEY (uom_id)
+    REFERENCES uom_master (uom_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_item_material FOREIGN KEY (material_id)
+    REFERENCES material_master (material_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_item_material_grade FOREIGN KEY (material_grade_id)
+    REFERENCES material_grade_master (material_grade_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_supplier (
+  item_supplier_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  supplier_item_code VARCHAR(120) NULL,
+  purchase_rate DECIMAL(18,2) NULL,
+  currency_code VARCHAR(10) NOT NULL DEFAULT 'INR',
+  moq DECIMAL(18,3) NULL,
+  lead_time_days INT UNSIGNED NULL,
+  effective_from DATE NULL,
+  effective_to DATE NULL,
+  preferred_supplier ENUM('Y', 'N') NOT NULL DEFAULT 'N',
+  remarks VARCHAR(500) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_supplier_id),
+  UNIQUE KEY uq_item_supplier (item_id, supplier_id),
+  KEY ix_item_supplier_party (supplier_id),
+  CONSTRAINT fk_item_supplier_item FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_item_supplier_party FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_reference_value (
+  item_reference_value_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  reference_group VARCHAR(50) NOT NULL,
+  reference_code VARCHAR(50) NOT NULL,
+  reference_label VARCHAR(120) NOT NULL,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (item_reference_value_id),
+  UNIQUE KEY uq_item_reference (reference_group,reference_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS hsn_master (
+  hsn_code VARCHAR(20) NOT NULL,
+  hsn_description VARCHAR(250) NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (hsn_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_type_spec_field (
+  item_type_spec_field_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_type_id BIGINT UNSIGNED NOT NULL,
+  field_code VARCHAR(60) NOT NULL,
+  field_label VARCHAR(120) NOT NULL,
+  input_type ENUM('TEXT','NUMBER','SELECT') NOT NULL,
+  required_flag ENUM('Y','N') NOT NULL DEFAULT 'N',
+  option_values_json JSON NULL,
+  allowed_uom_codes_json JSON NULL,
+  default_uom_code VARCHAR(20) NULL,
+  visible_when_field VARCHAR(60) NULL,
+  visible_when_value VARCHAR(120) NULL,
+  require_one_group VARCHAR(60) NULL,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (item_type_spec_field_id),
+  UNIQUE KEY uq_item_type_spec_field (item_type_id,field_code),
+  CONSTRAINT fk_item_type_spec_type FOREIGN KEY (item_type_id) REFERENCES item_type_master(item_type_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_type_description_template (
+  item_type_description_template_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_type_id BIGINT UNSIGNED NOT NULL,
+  condition_field_code VARCHAR(60) NULL,
+  condition_operator ENUM('EQUALS','PRESENT','DEFAULT') NOT NULL DEFAULT 'DEFAULT',
+  condition_value VARCHAR(120) NULL,
+  template_text VARCHAR(1000) NOT NULL,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (item_type_description_template_id),
+  UNIQUE KEY uq_item_type_description_template (item_type_id,display_order),
+  CONSTRAINT fk_item_description_template_type FOREIGN KEY (item_type_id) REFERENCES item_type_master(item_type_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_specification_value (
+  item_specification_value_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  item_type_spec_field_id BIGINT UNSIGNED NOT NULL,
+  value_text VARCHAR(500) NULL,
+  value_number DECIMAL(18,4) NULL,
+  uom_id BIGINT UNSIGNED NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_specification_value_id),
+  UNIQUE KEY uq_item_specification_value (item_id,item_type_spec_field_id),
+  CONSTRAINT fk_item_specification_item FOREIGN KEY (item_id) REFERENCES item_master(item_id) ON DELETE CASCADE,
+  CONSTRAINT fk_item_specification_field FOREIGN KEY (item_type_spec_field_id) REFERENCES item_type_spec_field(item_type_spec_field_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_item_specification_uom FOREIGN KEY (uom_id) REFERENCES uom_master(uom_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_attachment (
+  item_attachment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  document_type VARCHAR(50) NOT NULL DEFAULT 'OTHER',
+  document_description VARCHAR(250) NULL,
+  file_name VARCHAR(255) NOT NULL,
+  stored_file_name VARCHAR(255) NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  mime_type VARCHAR(150) NULL,
+  file_size BIGINT UNSIGNED NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_attachment_id),
+  KEY ix_item_attachment_item (item_id),
+  CONSTRAINT fk_item_attachment_item FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO item_group_master (group_code, group_name) VALUES
+  ('CA', 'Capital Item'), ('CM', 'Consumables'),
+  ('IG', 'Instruments & Gauges'), ('PC', 'Packing Materials'),
+  ('RM', 'Raw Material'), ('TL', 'Tools & Fixture')
+ON DUPLICATE KEY UPDATE group_name = VALUES(group_name), active_flag = 'Y';
+
+INSERT INTO item_type_master (item_group_id, type_name, description_prefix, item_code_prefix)
+SELECT G.item_group_id, X.type_name, X.description_prefix, X.description_prefix
+FROM (
+  SELECT 'CA' group_code, 'IT - Hardware' type_name, 'HRD' description_prefix UNION ALL
+  SELECT 'CA', 'Machines & Equipment', 'MAC' UNION ALL SELECT 'CA', 'Machine Accessories', 'MSA' UNION ALL
+  SELECT 'CA', 'Software', 'SFT' UNION ALL SELECT 'CA', 'Die & Pattern', 'DIE' UNION ALL
+  SELECT 'CA', 'Furniture', 'FUR' UNION ALL SELECT 'CA', 'Holders', 'HLD' UNION ALL SELECT 'CA', 'Fixtures', 'FIX' UNION ALL
+  SELECT 'CM', 'Fasteners', 'FST' UNION ALL SELECT 'CM', 'Purchase Items', 'PUR' UNION ALL
+  SELECT 'CM', 'Spring', 'SPR' UNION ALL SELECT 'CM', 'Plug', 'PLG' UNION ALL SELECT 'CM', 'Adhesive Materials', 'ADH' UNION ALL
+  SELECT 'IG', 'Variable', 'VAR' UNION ALL SELECT 'IG', 'Attribute', 'ATT' UNION ALL
+  SELECT 'IG', 'Thread Plug Gauge', 'TPG' UNION ALL SELECT 'IG', 'Plain Plug Gauge', 'PPG' UNION ALL
+  SELECT 'IG', 'Slip Gauge', 'SLG' UNION ALL SELECT 'IG', 'Vernier Caliper', 'VCL' UNION ALL
+  SELECT 'IG', 'Micrometer', 'MIC' UNION ALL SELECT 'IG', 'Micrometer - Digital', 'MID' UNION ALL
+  SELECT 'IG', 'Vernier Caliper - Digital', 'VCD' UNION ALL SELECT 'IG', 'Width Gauge', 'WDG' UNION ALL
+  SELECT 'IG', 'Bore Gauge', 'BRG' UNION ALL SELECT 'IG', 'Dial Indicator', 'DIN' UNION ALL SELECT 'IG', 'Bore Gauge Dial', 'BGD' UNION ALL
+  SELECT 'PC', 'Cotton Box', 'CTB' UNION ALL SELECT 'PC', 'Packing Cover', 'PKC' UNION ALL
+  SELECT 'PC', 'Silicon Gel', 'SGL' UNION ALL SELECT 'PC', 'Plywood', 'PLY' UNION ALL
+  SELECT 'PC', 'Steel Bin', 'STB' UNION ALL SELECT 'PC', 'Partition', 'PAR' UNION ALL
+  SELECT 'RM', 'Rod', 'ROD' UNION ALL SELECT 'RM', 'Plate', 'PLT' UNION ALL SELECT 'RM', 'Casting', 'CAS' UNION ALL
+  SELECT 'TL', 'Inserts', 'INS' UNION ALL SELECT 'TL', 'Drill', 'DRL' UNION ALL SELECT 'TL', 'Tap', 'TAP' UNION ALL
+  SELECT 'TL', 'Clamp Pads', 'CLP' UNION ALL SELECT 'TL', 'Stud', 'STD' UNION ALL SELECT 'TL', 'Bush', 'BSH'
+) X JOIN item_group_master G ON G.group_code = X.group_code
+ON DUPLICATE KEY UPDATE description_prefix = VALUES(description_prefix), active_flag = 'Y';
+
+INSERT INTO uom_master (uom_code, uom_name) VALUES
+  ('NOS','Numbers'),('KG','Kilogram'),('GM','Gram'),('MT','Metric Ton'),('MM','Millimetre'),
+  ('CM','Centimetre'),('MTR','Metre'),('SQM','Square Metre'),('LTR','Litre'),('ML','Millilitre'),
+  ('PCS','Pieces'),('SET','Set'),('PAIR','Pair'),('BOX','Box'),('PACK','Packet'),('ROLL','Roll'),
+  ('SHEET','Sheet'),('COIL','Coil'),('TUBE','Tube'),('LOT','Lot'),('HR','Hour'),('DAY','Day')
+ON DUPLICATE KEY UPDATE uom_name = VALUES(uom_name), active_flag = 'Y';
+
+INSERT INTO item_reference_value (reference_group,reference_code,reference_label,display_order) VALUES
+ ('ASSET_CATEGORY','MACHINE','Machine',10),('ASSET_CATEGORY','COMPUTER','Computer',20),('ASSET_CATEGORY','FURNITURE','Furniture',30),
+ ('ASSET_CATEGORY','SOFTWARE','Software',40),('ASSET_CATEGORY','MEASURING_EQUIPMENT','Measuring Equipment',50),
+ ('CALIBRATION_FREQUENCY','MONTHLY','Monthly',10),('CALIBRATION_FREQUENCY','QUARTERLY','Quarterly',20),
+ ('CALIBRATION_FREQUENCY','HALF_YEARLY','Half-yearly',30),('CALIBRATION_FREQUENCY','YEARLY','Yearly',40),
+ ('ITEM_STATUS','ACTIVE','Active',10),('ITEM_STATUS','INACTIVE','Inactive',20),('ITEM_STATUS','OBSOLETE','Obsolete',30),
+ ('CURRENCY','INR','INR',10),('CURRENCY','EUR','EUR',20),('CURRENCY','USD','USD',30),('CURRENCY','GBP','GBP',40)
+ON DUPLICATE KEY UPDATE reference_label=VALUES(reference_label),display_order=VALUES(display_order),active_flag='Y';
+
+INSERT INTO material_master (material_name) VALUES
+  ('6061'), ('6063'), ('16MnCr5'), ('Aluminium'), ('Brass'), ('Bronze'),
+  ('C45'), ('Carbide'), ('Cast Iron'), ('CR Sheet (MS)'), ('Delrin'),
+  ('EN 24'), ('EN 353'), ('EN 47'), ('EN 8'), ('EN 8/45'), ('EN19'),
+  ('Granite'), ('Gun Metal'), ('HSS'), ('Iron'), ('Low Carbon Steel'),
+  ('Mild Steel'), ('Nylon'), ('Plastic'), ('Spring Steel'), ('SS 303'),
+  ('SS 304'), ('SS 316'), ('SS 402'), ('SS 410'), ('SS 416'), ('SS 420'),
+  ('SS 431'), ('Steel'), ('Teflon')
+ON DUPLICATE KEY UPDATE active_flag = 'Y';
+
+-- ============================================================================
+-- Retired Item fields and Raw Material-only Material/Grade
+-- Source: item-master-field-removal-migration.sql
+-- ============================================================================
+
+-- Remove retired Item Master attributes and restrict Material/Grade to Raw Material.
+
+DROP TABLE IF EXISTS item_customer;
+
+UPDATE item_master I
+JOIN item_group_master G ON G.item_group_id=I.item_group_id
+SET I.material_id=NULL,I.material_grade_id=NULL
+WHERE G.group_code<>'RM'
+  AND I.item_id>0;
+
+DELETE FROM item_reference_value
+WHERE reference_group IN ('MAKE_BUY','STOCK_CLASSIFICATION','VALUATION_METHOD')
+  AND item_reference_value_id>0;
+
+SET @sql=IF(EXISTS(SELECT 1 FROM information_schema.columns
+  WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='make_buy_classification'),
+  'ALTER TABLE item_master DROP COLUMN make_buy_classification','SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql=IF(EXISTS(SELECT 1 FROM information_schema.columns
+  WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='stock_classification'),
+  'ALTER TABLE item_master DROP COLUMN stock_classification','SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql=IF(EXISTS(SELECT 1 FROM information_schema.columns
+  WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='valuation_method'),
+  'ALTER TABLE item_master DROP COLUMN valuation_method','SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ============================================================================
+-- Consumables-only Shelf Life radio flag
+-- Source: consumable-shelf-life-radio-migration.sql
+-- ============================================================================
+
+-- Consumables-only Shelf Life Yes/No with days required when applicable.
+
+SET @sql=IF(NOT EXISTS(SELECT 1 FROM information_schema.columns
+  WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='shelf_life_applicable'),
+  'ALTER TABLE item_master ADD COLUMN shelf_life_applicable ENUM(''Y'',''N'') NOT NULL DEFAULT ''N'' AFTER storage_location','SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql=IF(NOT EXISTS(SELECT 1 FROM information_schema.columns
+  WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='shelf_life_days'),
+  'ALTER TABLE item_master ADD COLUMN shelf_life_days INT UNSIGNED NULL AFTER shelf_life_applicable','SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+UPDATE item_master I
+JOIN item_group_master G ON G.item_group_id=I.item_group_id
+SET I.shelf_life_applicable='N',I.shelf_life_days=NULL
+WHERE G.group_code<>'CM'
+  AND I.item_id>0;
+
+UPDATE item_master I
+JOIN item_group_master G ON G.item_group_id=I.item_group_id
+SET I.shelf_life_days=NULL
+WHERE G.group_code='CM'
+  AND I.shelf_life_applicable='N'
+  AND I.item_id>0;
+
+-- ============================================================================
+-- Machine types, machine models and installed machine units
+-- Source: machine-master-schema.sql
+-- ============================================================================
+
+-- ATECH ERP - Machine Master
+-- Links installed physical machines to CA / Machines & Equipment Item Master records.
+
+SET @ATECH_OLD_SQL_SAFE_UPDATES = @@SQL_SAFE_UPDATES;
+SET SQL_SAFE_UPDATES = 0;
+
+CREATE TABLE IF NOT EXISTS machine_type_master (
+  machine_type_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  machine_type_code VARCHAR(30) NOT NULL,
+  machine_type_name VARCHAR(120) NOT NULL,
+  hourly_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (machine_type_id),
+  UNIQUE KEY uq_machine_type_code (machine_type_code),
+  UNIQUE KEY uq_machine_type_name (machine_type_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO machine_type_master
+  (machine_type_code,machine_type_name,display_order,active_flag)
+VALUES
+  ('VMC','Vertical Machining Centre',10,'Y'),
+  ('HMC','Horizontal Machining Centre',20,'Y'),
+  ('CNC_TURNING','CNC Turning Centre',30,'Y'),
+  ('SWISS_TYPE','Swiss Type / Sliding Head CNC',40,'Y'),
+  ('GRINDING','Grinding Machine',50,'Y'),
+  ('CONVENTIONAL','Conventional Machine',60,'Y'),
+  ('OTHER','Other',999,'Y')
+ON DUPLICATE KEY UPDATE
+  machine_type_name=VALUES(machine_type_name),
+  display_order=VALUES(display_order),
+  active_flag='Y';
+
+DELIMITER $$
+DROP PROCEDURE IF EXISTS add_machine_item_columns$$
+CREATE PROCEDURE add_machine_item_columns()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema=DATABASE() AND table_name='machine_type_master' AND column_name='hourly_cost_inr'
+  ) THEN
+    ALTER TABLE machine_type_master ADD COLUMN hourly_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0 AFTER machine_type_name;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='machine_type_id'
+  ) THEN
+    ALTER TABLE item_master ADD COLUMN machine_type_id BIGINT UNSIGNED NULL AFTER model_name;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema=DATABASE() AND table_name='item_master' AND column_name='machine_capacity'
+  ) THEN
+    ALTER TABLE item_master ADD COLUMN machine_capacity VARCHAR(500) NULL AFTER machine_type_id;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_schema=DATABASE() AND table_name='item_master'
+      AND constraint_name='fk_item_machine_type'
+  ) THEN
+    ALTER TABLE item_master
+      ADD CONSTRAINT fk_item_machine_type
+      FOREIGN KEY (machine_type_id) REFERENCES machine_type_master(machine_type_id)
+      ON UPDATE CASCADE ON DELETE RESTRICT;
+  END IF;
+END$$
+CALL add_machine_item_columns()$$
+DROP PROCEDURE add_machine_item_columns$$
+DELIMITER ;
+
+CREATE TABLE IF NOT EXISTS machine_master (
+  machine_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  other_specification VARCHAR(1000) NULL,
+  machine_status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (machine_master_id),
+  UNIQUE KEY uq_machine_master_item (item_id),
+  CONSTRAINT fk_machine_master_item FOREIGN KEY (item_id)
+    REFERENCES item_master(item_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS machine_unit (
+  machine_unit_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  machine_master_id BIGINT UNSIGNED NOT NULL,
+  machine_code VARCHAR(50) NOT NULL,
+  serial_number VARCHAR(120) NULL,
+  installation_date DATE NULL,
+  plant_location VARCHAR(150) NULL,
+  department_name VARCHAR(120) NULL,
+  unit_status ENUM('ACTIVE','UNDER_MAINTENANCE','BREAKDOWN','IDLE','DECOMMISSIONED') NOT NULL DEFAULT 'ACTIVE',
+  hourly_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0,
+  remarks VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (machine_unit_id),
+  UNIQUE KEY uq_machine_unit_code (machine_code),
+  KEY idx_machine_unit_master (machine_master_id),
+  KEY idx_machine_unit_status (unit_status),
+  CONSTRAINT fk_machine_unit_master FOREIGN KEY (machine_master_id)
+    REFERENCES machine_master(machine_master_id) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @has_legacy_unit_hourly_cost := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='machine_unit' AND COLUMN_NAME='hourly_cost_inr'
+);
+SET @legacy_unit_hourly_cost_sql := IF(@has_legacy_unit_hourly_cost=0,
+  'ALTER TABLE machine_unit ADD COLUMN hourly_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0 AFTER unit_status',
+  'SELECT 1');
+PREPARE legacy_unit_hourly_cost_statement FROM @legacy_unit_hourly_cost_sql;
+EXECUTE legacy_unit_hourly_cost_statement;
+DEALLOCATE PREPARE legacy_unit_hourly_cost_statement;
+
+-- Preserve an existing unit rate only when every configured positive unit rate
+-- for the Machine Type is identical. Conflicting rates remain 0 for review.
+UPDATE machine_type_master MT
+JOIN (
+  SELECT I.machine_type_id,MAX(MU.hourly_cost_inr) AS hourly_cost_inr
+  FROM machine_unit MU
+  JOIN machine_master MM ON MM.machine_master_id=MU.machine_master_id
+  JOIN item_master I ON I.item_id=MM.item_id
+  WHERE MU.hourly_cost_inr > 0
+  GROUP BY I.machine_type_id
+  HAVING COUNT(DISTINCT MU.hourly_cost_inr)=1
+) R ON R.machine_type_id=MT.machine_type_id
+SET MT.hourly_cost_inr=R.hourly_cost_inr
+WHERE MT.machine_type_id > 0 AND MT.hourly_cost_inr=0;
+
+SET SQL_SAFE_UPDATES = @ATECH_OLD_SQL_SAFE_UPDATES;
+
+-- Verification
+SELECT machine_type_id,machine_type_code,machine_type_name,hourly_cost_inr
+FROM machine_type_master WHERE active_flag='Y' ORDER BY display_order,machine_type_name;
+
+-- ============================================================================
+-- Part Bill of Material links
+-- Source: part-bom-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS part_bill_of_material (
+  bom_component_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  parent_part_id BIGINT UNSIGNED NOT NULL,
+  component_type ENUM('PART', 'ITEM') NOT NULL,
+  component_part_id BIGINT UNSIGNED NULL,
+  component_item_id BIGINT UNSIGNED NULL,
+  uom_id BIGINT UNSIGNED NULL,
+  quantity DECIMAL(18,3) NOT NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (bom_component_id),
+  UNIQUE KEY uq_part_bom_component_part (parent_part_id, component_part_id),
+  UNIQUE KEY uq_part_bom_component_item (parent_part_id, component_item_id),
+  KEY ix_part_bom_parent (parent_part_id),
+  KEY ix_part_bom_part (component_part_id),
+  KEY ix_part_bom_item (component_item_id),
+  KEY ix_part_bom_uom (uom_id),
+  CONSTRAINT fk_part_bom_parent FOREIGN KEY (parent_part_id)
+    REFERENCES part_master (part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_part_bom_part FOREIGN KEY (component_part_id)
+    REFERENCES part_master (part_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_part_bom_item FOREIGN KEY (component_item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_part_bom_uom FOREIGN KEY (uom_id)
+    REFERENCES uom_master (uom_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT ck_part_bom_quantity CHECK (quantity > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- Part Process Flow and operation-wise Inspection Plan
+-- Source: part-process-inspection-schema.sql
+-- ============================================================================
+
+-- Part Process Flow and operation-wise Inspection Plan
+-- Run after machine-master-schema.sql and part-bom-schema.sql.
+
+SET @has_machine_type_hourly_cost := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='machine_type_master' AND COLUMN_NAME='hourly_cost_inr'
+);
+SET @machine_type_hourly_cost_sql := IF(@has_machine_type_hourly_cost=0,
+  'ALTER TABLE machine_type_master ADD COLUMN hourly_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0 AFTER machine_type_name',
+  'SELECT 1');
+PREPARE machine_type_hourly_cost_statement FROM @machine_type_hourly_cost_sql;
+EXECUTE machine_type_hourly_cost_statement;
+DEALLOCATE PREPARE machine_type_hourly_cost_statement;
+
+SET @has_machine_hourly_cost := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='machine_unit' AND COLUMN_NAME='hourly_cost_inr'
+);
+SET @machine_hourly_cost_sql := IF(@has_machine_hourly_cost=0,
+  'ALTER TABLE machine_unit ADD COLUMN hourly_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0 AFTER unit_status',
+  'SELECT 1');
+PREPARE machine_hourly_cost_statement FROM @machine_hourly_cost_sql;
+EXECUTE machine_hourly_cost_statement;
+DEALLOCATE PREPARE machine_hourly_cost_statement;
+
+CREATE TABLE IF NOT EXISTS operation_master (
+  operation_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  operation_code VARCHAR(30) NOT NULL,
+  operation_name VARCHAR(120) NOT NULL,
+  default_source ENUM('INHOUSE','OUTSOURCE') NOT NULL DEFAULT 'INHOUSE',
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (operation_master_id),
+  UNIQUE KEY uq_operation_code (operation_code),
+  UNIQUE KEY uq_operation_name (operation_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE operation_master MODIFY operation_code VARCHAR(60) NOT NULL;
+
+CREATE TABLE IF NOT EXISTS operation_source_master (
+  source_code VARCHAR(30) NOT NULL,
+  source_name VARCHAR(80) NOT NULL,
+  costing_mode ENUM('INHOUSE','OUTSOURCE') NOT NULL,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (source_code),
+  UNIQUE KEY uq_operation_source_name (source_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS inspection_characteristic_master (
+  characteristic_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  characteristic_code VARCHAR(30) NOT NULL,
+  characteristic_name VARCHAR(150) NOT NULL,
+  characteristic_type ENUM('VARIABLE','ATTRIBUTE') NOT NULL DEFAULT 'VARIABLE',
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (characteristic_master_id),
+  UNIQUE KEY uq_inspection_characteristic_code (characteristic_code),
+  UNIQUE KEY uq_inspection_characteristic_name (characteristic_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS inspection_instrument_master (
+  instrument_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  instrument_code VARCHAR(30) NOT NULL,
+  instrument_name VARCHAR(150) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (instrument_master_id),
+  UNIQUE KEY uq_inspection_instrument_code (instrument_code),
+  UNIQUE KEY uq_inspection_instrument_name (instrument_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS inspection_sample_size_master (
+  sample_size_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sample_size_code VARCHAR(30) NOT NULL,
+  sample_size_label VARCHAR(80) NOT NULL,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (sample_size_id),
+  UNIQUE KEY uq_inspection_sample_size_code (sample_size_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS inspection_frequency_master (
+  frequency_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  frequency_code VARCHAR(30) NOT NULL,
+  frequency_label VARCHAR(100) NOT NULL,
+  display_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (frequency_id),
+  UNIQUE KEY uq_inspection_frequency_code (frequency_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tolerance_grade_master (
+  tolerance_grade_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  grade_code VARCHAR(20) NOT NULL,
+  basic_size_from DECIMAL(12,4) NOT NULL,
+  basic_size_to DECIMAL(12,4) NOT NULL,
+  lower_deviation_microns DECIMAL(12,4) NOT NULL DEFAULT 0,
+  upper_deviation_microns DECIMAL(12,4) NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (tolerance_grade_id),
+  UNIQUE KEY uq_tolerance_grade_range (grade_code,basic_size_from,basic_size_to)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS part_process_plan (
+  process_plan_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  part_id BIGINT UNSIGNED NOT NULL,
+  drawing_revision_number VARCHAR(50) NULL,
+  production_capacity_per_day DECIMAL(18,3) NULL,
+  plan_status ENUM('DRAFT','APPROVED') NOT NULL DEFAULT 'DRAFT',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (process_plan_id),
+  UNIQUE KEY uq_part_process_revision (part_id,drawing_revision_number),
+  CONSTRAINT fk_process_plan_part FOREIGN KEY (part_id)
+    REFERENCES part_master(part_id) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS part_process_operation (
+  process_operation_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  process_plan_id BIGINT UNSIGNED NOT NULL,
+  operation_number INT NOT NULL,
+  operation_master_id BIGINT UNSIGNED NULL,
+  operation_description VARCHAR(500) NULL,
+  source_type ENUM('INHOUSE','OUTSOURCE') NOT NULL,
+  machine_type_id BIGINT UNSIGNED NULL,
+  machine_unit_id BIGINT UNSIGNED NULL,
+  cycle_time_seconds DECIMAL(18,3) NULL,
+  clamping_time_seconds DECIMAL(18,3) NULL,
+  setting_time_hours DECIMAL(18,3) NULL,
+  outsource_cost_inr DECIMAL(18,2) NULL,
+  process_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0,
+  inspection_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  sequence_authorization_type ENUM('REWORK','DEVIATION','OVERRIDE_APPROVAL') NULL,
+  sequence_authorization_reason VARCHAR(1000) NULL,
+  sequence_authorized_by VARCHAR(50) NULL,
+  sequence_authorized_name VARCHAR(150) NULL,
+  sequence_authorized_role VARCHAR(100) NULL,
+  sequence_authorized_on DATETIME NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (process_operation_id),
+  UNIQUE KEY uq_process_operation_number (process_plan_id,operation_number),
+  KEY ix_process_operation_master (operation_master_id),
+  KEY ix_process_operation_machine_type (machine_type_id),
+  KEY ix_process_operation_machine (machine_unit_id),
+  CONSTRAINT fk_process_operation_plan FOREIGN KEY (process_plan_id)
+    REFERENCES part_process_plan(process_plan_id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_process_operation_master FOREIGN KEY (operation_master_id)
+    REFERENCES operation_master(operation_master_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_process_operation_machine_type FOREIGN KEY (machine_type_id)
+    REFERENCES machine_type_master(machine_type_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_process_operation_machine FOREIGN KEY (machine_unit_id)
+    REFERENCES machine_unit(machine_unit_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS part_operation_inspection_plan (
+  inspection_plan_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  process_operation_id BIGINT UNSIGNED NOT NULL,
+  cmm_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  plan_status ENUM('DRAFT','READY') NOT NULL DEFAULT 'DRAFT',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (inspection_plan_id),
+  UNIQUE KEY uq_operation_inspection_plan (process_operation_id),
+  CONSTRAINT fk_inspection_plan_operation FOREIGN KEY (process_operation_id)
+    REFERENCES part_process_operation(process_operation_id) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS part_inspection_characteristic (
+  inspection_characteristic_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  inspection_plan_id BIGINT UNSIGNED NOT NULL,
+  sequence_number INT NOT NULL,
+  balloon_number VARCHAR(30) NULL,
+  characteristic_master_id BIGINT UNSIGNED NULL,
+  specified_dimension DECIMAL(18,4) NULL,
+  tolerance_mode ENUM('GRADE','MANUAL','NOT_APPLICABLE') NOT NULL DEFAULT 'MANUAL',
+  tolerance_grade_id BIGINT UNSIGNED NULL,
+  tolerance_grade_text VARCHAR(50) NULL,
+  tolerance_minus DECIMAL(18,4) NULL,
+  tolerance_plus DECIMAL(18,4) NULL,
+  lsl DECIMAL(18,4) NULL,
+  usl DECIMAL(18,4) NULL,
+  drawing_grid VARCHAR(50) NULL,
+  instrument_master_id BIGINT UNSIGNED NULL,
+  sample_size VARCHAR(50) NULL,
+  inspection_frequency VARCHAR(100) NULL,
+  sc_cc_identification ENUM('Y','N') NOT NULL DEFAULT 'N',
+  patrol_qa_result ENUM('OK','NOT_OK') NULL,
+  periodic_operator_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  final_inspection_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (inspection_characteristic_id),
+  UNIQUE KEY uq_inspection_characteristic_sequence (inspection_plan_id,sequence_number),
+  KEY ix_part_inspection_characteristic (characteristic_master_id),
+  KEY ix_part_inspection_instrument (instrument_master_id),
+  CONSTRAINT fk_characteristic_inspection_plan FOREIGN KEY (inspection_plan_id)
+    REFERENCES part_operation_inspection_plan(inspection_plan_id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_characteristic_master FOREIGN KEY (characteristic_master_id)
+    REFERENCES inspection_characteristic_master(characteristic_master_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_characteristic_tolerance FOREIGN KEY (tolerance_grade_id)
+    REFERENCES tolerance_grade_master(tolerance_grade_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_characteristic_instrument FOREIGN KEY (instrument_master_id)
+    REFERENCES inspection_instrument_master(instrument_master_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE part_process_operation MODIFY operation_master_id BIGINT UNSIGNED NULL;
+ALTER TABLE part_inspection_characteristic MODIFY characteristic_master_id BIGINT UNSIGNED NULL;
+
+SET @has_process_machine_type := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='machine_type_id'
+);
+SET @process_machine_type_sql := IF(@has_process_machine_type=0,
+  'ALTER TABLE part_process_operation ADD COLUMN machine_type_id BIGINT UNSIGNED NULL AFTER source_type',
+  'SELECT 1');
+PREPARE process_machine_type_statement FROM @process_machine_type_sql;
+EXECUTE process_machine_type_statement;
+DEALLOCATE PREPARE process_machine_type_statement;
+
+UPDATE part_process_operation PO
+JOIN machine_unit MU ON MU.machine_unit_id=PO.machine_unit_id
+JOIN machine_master MM ON MM.machine_master_id=MU.machine_master_id
+JOIN item_master I ON I.item_id=MM.item_id
+SET PO.machine_type_id=I.machine_type_id
+WHERE PO.process_operation_id > 0 AND PO.machine_type_id IS NULL;
+
+SET @has_process_machine_type_fk := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND CONSTRAINT_NAME='fk_process_operation_machine_type'
+);
+SET @process_machine_type_fk_sql := IF(@has_process_machine_type_fk=0,
+  'ALTER TABLE part_process_operation ADD CONSTRAINT fk_process_operation_machine_type FOREIGN KEY (machine_type_id) REFERENCES machine_type_master(machine_type_id) ON UPDATE CASCADE ON DELETE RESTRICT',
+  'SELECT 1');
+PREPARE process_machine_type_fk_statement FROM @process_machine_type_fk_sql;
+EXECUTE process_machine_type_fk_statement;
+DEALLOCATE PREPARE process_machine_type_fk_statement;
+
+SET @has_cmm_required := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_operation_inspection_plan'
+    AND COLUMN_NAME='cmm_required'
+);
+SET @cmm_required_sql := IF(@has_cmm_required=0,
+  "ALTER TABLE part_operation_inspection_plan ADD COLUMN cmm_required ENUM('Y','N') NOT NULL DEFAULT 'N' AFTER process_operation_id",
+  'SELECT 1');
+PREPARE cmm_required_statement FROM @cmm_required_sql;
+EXECUTE cmm_required_statement;
+DEALLOCATE PREPARE cmm_required_statement;
+
+SET @has_tolerance_grade_text := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_inspection_characteristic'
+    AND COLUMN_NAME='tolerance_grade_text'
+);
+SET @tolerance_grade_text_sql := IF(@has_tolerance_grade_text=0,
+  'ALTER TABLE part_inspection_characteristic ADD COLUMN tolerance_grade_text VARCHAR(50) NULL AFTER tolerance_grade_id',
+  'SELECT 1');
+PREPARE tolerance_grade_text_statement FROM @tolerance_grade_text_sql;
+EXECUTE tolerance_grade_text_statement;
+DEALLOCATE PREPARE tolerance_grade_text_statement;
+
+UPDATE part_inspection_characteristic PIC
+JOIN tolerance_grade_master TGM ON TGM.tolerance_grade_id=PIC.tolerance_grade_id
+SET PIC.tolerance_grade_text=TGM.grade_code
+WHERE PIC.inspection_characteristic_id > 0
+  AND PIC.tolerance_grade_text IS NULL;
+
+-- Sequential operation control. A later operation may start while its previous
+-- operation is still DRAFT only when an authorised release is recorded.
+SET @has_sequence_authorization_type := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='sequence_authorization_type'
+);
+SET @sequence_authorization_type_sql := IF(@has_sequence_authorization_type=0,
+  "ALTER TABLE part_process_operation ADD COLUMN sequence_authorization_type ENUM('REWORK','DEVIATION','OVERRIDE_APPROVAL') NULL AFTER inspection_required",
+  'SELECT 1');
+PREPARE sequence_authorization_type_statement FROM @sequence_authorization_type_sql;
+EXECUTE sequence_authorization_type_statement;
+DEALLOCATE PREPARE sequence_authorization_type_statement;
+
+SET @has_sequence_authorization_reason := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='sequence_authorization_reason'
+);
+SET @sequence_authorization_reason_sql := IF(@has_sequence_authorization_reason=0,
+  'ALTER TABLE part_process_operation ADD COLUMN sequence_authorization_reason VARCHAR(1000) NULL AFTER sequence_authorization_type',
+  'SELECT 1');
+PREPARE sequence_authorization_reason_statement FROM @sequence_authorization_reason_sql;
+EXECUTE sequence_authorization_reason_statement;
+DEALLOCATE PREPARE sequence_authorization_reason_statement;
+
+SET @has_sequence_authorized_by := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='sequence_authorized_by'
+);
+SET @sequence_authorized_by_sql := IF(@has_sequence_authorized_by=0,
+  'ALTER TABLE part_process_operation ADD COLUMN sequence_authorized_by VARCHAR(50) NULL AFTER sequence_authorization_reason',
+  'SELECT 1');
+PREPARE sequence_authorized_by_statement FROM @sequence_authorized_by_sql;
+EXECUTE sequence_authorized_by_statement;
+DEALLOCATE PREPARE sequence_authorized_by_statement;
+
+SET @has_sequence_authorized_name := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='sequence_authorized_name'
+);
+SET @sequence_authorized_name_sql := IF(@has_sequence_authorized_name=0,
+  'ALTER TABLE part_process_operation ADD COLUMN sequence_authorized_name VARCHAR(150) NULL AFTER sequence_authorized_by',
+  'SELECT 1');
+PREPARE sequence_authorized_name_statement FROM @sequence_authorized_name_sql;
+EXECUTE sequence_authorized_name_statement;
+DEALLOCATE PREPARE sequence_authorized_name_statement;
+
+SET @has_sequence_authorized_role := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='sequence_authorized_role'
+);
+SET @sequence_authorized_role_sql := IF(@has_sequence_authorized_role=0,
+  'ALTER TABLE part_process_operation ADD COLUMN sequence_authorized_role VARCHAR(100) NULL AFTER sequence_authorized_name',
+  'SELECT 1');
+PREPARE sequence_authorized_role_statement FROM @sequence_authorized_role_sql;
+EXECUTE sequence_authorized_role_statement;
+DEALLOCATE PREPARE sequence_authorized_role_statement;
+
+SET @has_sequence_authorized_on := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND COLUMN_NAME='sequence_authorized_on'
+);
+SET @sequence_authorized_on_sql := IF(@has_sequence_authorized_on=0,
+  'ALTER TABLE part_process_operation ADD COLUMN sequence_authorized_on DATETIME NULL AFTER sequence_authorized_role',
+  'SELECT 1');
+PREPARE sequence_authorized_on_statement FROM @sequence_authorized_on_sql;
+EXECUTE sequence_authorized_on_statement;
+DEALLOCATE PREPARE sequence_authorized_on_statement;
+
+INSERT INTO operation_master (operation_code,operation_name,default_source,display_order) VALUES
+ ('MILLING','Milling','INHOUSE',10),('DRILLING','Drilling','INHOUSE',20),
+ ('MILLING_DRILLING','Milling and Drilling','INHOUSE',21),
+ ('MILLING_DRILLING_TAPPING','Milling, Drilling and Tapping','INHOUSE',22),
+ ('MILLING_BORING_DRILLING_TAPPING','Milling, Boring, Drilling and Tapping','INHOUSE',23),
+ ('FINAL_INSPECTION','Final Inspection','INHOUSE',30),('INWARD_INSPECTION','Inward Inspection','INHOUSE',40),
+ ('HEAT_TREATMENT','Heat Treatment','OUTSOURCE',50),('TURNING','Turning','INHOUSE',60),
+ ('POWDER_COATING','Powder Coating','OUTSOURCE',70),('PHOSPHATING','Phosphating','OUTSOURCE',80),
+ ('PACKING','Packing','INHOUSE',90),('OIL_APPLICATION','Oil Dipping / Application','INHOUSE',100)
+ON DUPLICATE KEY UPDATE operation_name=VALUES(operation_name),default_source=VALUES(default_source),active_flag='Y';
+
+INSERT INTO operation_source_master
+ (source_code,source_name,costing_mode,display_order,active_flag) VALUES
+ ('INHOUSE','In-house','INHOUSE',10,'Y'),
+ ('OUTSOURCE','Outsource','OUTSOURCE',20,'Y')
+ON DUPLICATE KEY UPDATE source_name=VALUES(source_name),costing_mode=VALUES(costing_mode),
+ display_order=VALUES(display_order),active_flag=VALUES(active_flag);
+
+INSERT INTO inspection_characteristic_master (characteristic_code,characteristic_name,characteristic_type) VALUES
+ ('BORE_DIA','Bore Diameter','VARIABLE'),('HOLE_DIA','Hole Diameter','VARIABLE'),
+ ('TAP','Tap','ATTRIBUTE'),('DRILL_DIA','Drill Diameter','VARIABLE'),('DEPTH','Depth','VARIABLE'),
+ ('CENTER_DISTANCE','Centre Distance','VARIABLE'),('FLATNESS','Flatness','VARIABLE'),
+ ('SURFACE_FINISH','Surface Finish','ATTRIBUTE'),('VISUAL','Visual Inspection','ATTRIBUTE')
+ON DUPLICATE KEY UPDATE characteristic_name=VALUES(characteristic_name),characteristic_type=VALUES(characteristic_type),active_flag='Y';
+
+INSERT INTO inspection_instrument_master (instrument_code,instrument_name) VALUES
+ ('VERNIER','Vernier Caliper'),('DIGITAL_VERNIER','Digital Vernier Caliper'),
+ ('MICROMETER','Micrometer'),('DIGITAL_MICROMETER','Digital Micrometer'),
+ ('BORE_GAUGE','Bore Gauge'),('HEIGHT_GAUGE','Height Gauge'),('DEPTH_GAUGE','Depth Gauge'),
+ ('THREAD_PLUG','Thread Plug Gauge'),('PLAIN_PLUG','Plain Plug Gauge'),('THREAD_RING','Thread Ring Gauge'),
+ ('PLAIN_RING','Plain Ring Gauge'),('DIAL_INDICATOR','Dial Indicator'),('CMM','CMM'),
+ ('WIDTH_GAUGE','Width Gauge'),('VISUAL','Visual'),('HEIGHT_GAUGE_2D','2D Height Gauge'),
+ ('BORE_DIAL','Bore Dial'),('PIN_GAUGE','Pin Gauge'),('TPG_VERNIER','TPG + Vernier'),
+ ('PPG_VERNIER','PPG + Vernier'),('PIN_VERNIER','Pin + Vernier'),
+ ('BEVEL_PROTRACTOR','Bevel Protractor'),('LEVER_DIAL','Lever Dial'),('TEMPLATE','Template'),
+ ('FUNCTION_GAUGE','Function Gauge'),('MANDREL','Mandrel'),('SCREW_VERNIER','Screw + Vernier'),
+ ('TORQUE_WRENCH','Torque Wrench'),('RADIUS_GAUGE','Radius Gauge'),
+ ('DEPTH_VERNIER','Depth Vernier'),('DEPTH_MICROMETER','Depth Micrometer'),
+ ('INSIDE_CALIPER','Inside Caliper'),('SNAP_GAUGE','Snap Gauge'),('GROOVE_DIAL','Groove Dial'),
+ ('PROGRAM_QUALIFIED','Program Qualified'),('TOOL_QUALIFIED','Tool Qualified'),
+ ('FEELER_GAUGE','Feeler Gauge'),('SLIP_GAUGE','Slip Gauge')
+ON DUPLICATE KEY UPDATE instrument_name=VALUES(instrument_name),active_flag='Y';
+
+INSERT INTO inspection_sample_size_master (sample_size_code,sample_size_label,display_order) VALUES
+ ('1','1',10),('2','2',20),('3','3',30),('5','5',40),('10','10',50),('100_PERCENT','100%',60)
+ON DUPLICATE KEY UPDATE sample_size_label=VALUES(sample_size_label),display_order=VALUES(display_order),active_flag='Y';
+
+INSERT INTO inspection_frequency_master (frequency_code,frequency_label,display_order) VALUES
+ ('EVERY_PART','Every Part',10),('EVERY_5','Every 5 Parts',20),('EVERY_10','Every 10 Parts',30),
+ ('HOURLY','Hourly',40),('PER_SHIFT','Once per Shift',50),('FIRST_LAST','First & Last Part',60),
+ ('FINAL','Final Inspection',70)
+ON DUPLICATE KEY UPDATE frequency_label=VALUES(frequency_label),display_order=VALUES(display_order),active_flag='Y';
+
+INSERT INTO tolerance_grade_master
+ (grade_code,basic_size_from,basic_size_to,lower_deviation_microns,upper_deviation_microns) VALUES
+ ('H6',0,3,0,6),('H6',3,6,0,8),('H6',6,10,0,9),('H6',10,18,0,11),
+ ('H7',0,3,0,10),('H7',3,6,0,12),('H7',6,10,0,15),('H7',10,18,0,18),
+ ('H8',0,3,0,14),('H8',3,6,0,18),('H8',6,10,0,22),('H8',10,18,0,27)
+ON DUPLICATE KEY UPDATE lower_deviation_microns=VALUES(lower_deviation_microns),
+ upper_deviation_microns=VALUES(upper_deviation_microns),active_flag='Y';
+
+-- ============================================================================
+-- Process Plan variants and shared process definitions
+-- Source: process-plan-variants-shared-definitions-migration.sql
+-- ============================================================================
+
+-- Multiple capacity-specific Process Plan variants with reusable shared process definitions.
+
+SET @has_plan_code := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND COLUMN_NAME='plan_code'
+);
+SET @plan_code_sql := IF(@has_plan_code=0,
+  "ALTER TABLE part_process_plan ADD COLUMN plan_code VARCHAR(30) NULL AFTER drawing_revision_number",
+  'SELECT 1');
+PREPARE plan_code_statement FROM @plan_code_sql;
+EXECUTE plan_code_statement;
+DEALLOCATE PREPARE plan_code_statement;
+
+SET @has_route_name := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND COLUMN_NAME='route_name'
+);
+SET @route_name_sql := IF(@has_route_name=0,
+  "ALTER TABLE part_process_plan ADD COLUMN route_name VARCHAR(150) NULL AFTER plan_code",
+  'SELECT 1');
+PREPARE route_name_statement FROM @route_name_sql;
+EXECUTE route_name_statement;
+DEALLOCATE PREPARE route_name_statement;
+
+SET @has_default_flag := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND COLUMN_NAME='is_default'
+);
+SET @default_flag_sql := IF(@has_default_flag=0,
+  "ALTER TABLE part_process_plan ADD COLUMN is_default ENUM('Y','N') NOT NULL DEFAULT 'N' AFTER plan_status",
+  'SELECT 1');
+PREPARE default_flag_statement FROM @default_flag_sql;
+EXECUTE default_flag_statement;
+DEALLOCATE PREPARE default_flag_statement;
+
+SET @has_plan_active_flag := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND COLUMN_NAME='active_flag'
+);
+SET @plan_active_flag_sql := IF(@has_plan_active_flag=0,
+  "ALTER TABLE part_process_plan ADD COLUMN active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y' AFTER is_default",
+  'SELECT 1');
+PREPARE plan_active_flag_statement FROM @plan_active_flag_sql;
+EXECUTE plan_active_flag_statement;
+DEALLOCATE PREPARE plan_active_flag_statement;
+
+UPDATE part_process_plan
+SET plan_code=COALESCE(NULLIF(plan_code,''),CONCAT('PP-',LPAD(process_plan_id,4,'0'))),
+    route_name=COALESCE(NULLIF(route_name,''),'Default Route')
+WHERE process_plan_id>0;
+
+DROP TEMPORARY TABLE IF EXISTS process_plan_default_candidates;
+CREATE TEMPORARY TABLE process_plan_default_candidates AS
+SELECT P.part_id,MIN(P.process_plan_id) AS default_plan_id
+FROM part_process_plan P
+LEFT JOIN part_process_plan D ON D.part_id=P.part_id AND D.is_default='Y'
+WHERE D.process_plan_id IS NULL
+GROUP BY P.part_id;
+UPDATE part_process_plan P
+JOIN process_plan_default_candidates D ON D.default_plan_id=P.process_plan_id
+SET P.is_default='Y'
+WHERE P.process_plan_id>0;
+DROP TEMPORARY TABLE process_plan_default_candidates;
+
+SET @has_old_plan_unique := (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND INDEX_NAME='uq_part_process_revision'
+);
+SET @has_plan_part_index := (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND INDEX_NAME='ix_process_plan_part'
+);
+SET @plan_part_index_sql := IF(@has_plan_part_index=0,
+  'ALTER TABLE part_process_plan ADD KEY ix_process_plan_part (part_id)',
+  'SELECT 1');
+PREPARE plan_part_index_statement FROM @plan_part_index_sql;
+EXECUTE plan_part_index_statement;
+DEALLOCATE PREPARE plan_part_index_statement;
+
+SET @drop_old_plan_unique_sql := IF(@has_old_plan_unique>0,
+  'ALTER TABLE part_process_plan DROP INDEX uq_part_process_revision',
+  'SELECT 1');
+PREPARE drop_old_plan_unique_statement FROM @drop_old_plan_unique_sql;
+EXECUTE drop_old_plan_unique_statement;
+DEALLOCATE PREPARE drop_old_plan_unique_statement;
+
+SET @has_variant_unique := (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_plan' AND INDEX_NAME='uq_part_process_variant_code'
+);
+SET @variant_unique_sql := IF(@has_variant_unique=0,
+  'ALTER TABLE part_process_plan ADD UNIQUE KEY uq_part_process_variant_code (part_id,plan_code)',
+  'SELECT 1');
+PREPARE variant_unique_statement FROM @variant_unique_sql;
+EXECUTE variant_unique_statement;
+DEALLOCATE PREPARE variant_unique_statement;
+
+CREATE TABLE IF NOT EXISTS part_process_definition (
+  process_definition_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  part_id BIGINT UNSIGNED NOT NULL,
+  definition_code VARCHAR(30) NOT NULL,
+  operation_master_id BIGINT UNSIGNED NULL,
+  operation_description VARCHAR(500) NULL,
+  source_type ENUM('INHOUSE','OUTSOURCE') NOT NULL,
+  machine_type_id BIGINT UNSIGNED NULL,
+  cycle_time_seconds DECIMAL(18,3) NULL,
+  clamping_time_seconds DECIMAL(18,3) NULL,
+  setting_time_hours DECIMAL(18,3) NULL,
+  outsource_cost_inr DECIMAL(18,2) NULL,
+  process_cost_inr DECIMAL(18,2) NOT NULL DEFAULT 0,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (process_definition_id),
+  UNIQUE KEY uq_part_process_definition_code (part_id,definition_code),
+  KEY ix_process_definition_operation (operation_master_id),
+  KEY ix_process_definition_machine_type (machine_type_id),
+  CONSTRAINT fk_process_definition_part FOREIGN KEY (part_id)
+    REFERENCES part_master(part_id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_process_definition_operation FOREIGN KEY (operation_master_id)
+    REFERENCES operation_master(operation_master_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_process_definition_machine_type FOREIGN KEY (machine_type_id)
+    REFERENCES machine_type_master(machine_type_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @has_process_definition_id := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation' AND COLUMN_NAME='process_definition_id'
+);
+SET @process_definition_id_sql := IF(@has_process_definition_id=0,
+  'ALTER TABLE part_process_operation ADD COLUMN process_definition_id BIGINT UNSIGNED NULL AFTER process_plan_id',
+  'SELECT 1');
+PREPARE process_definition_id_statement FROM @process_definition_id_sql;
+EXECUTE process_definition_id_statement;
+DEALLOCATE PREPARE process_definition_id_statement;
+
+INSERT INTO part_process_definition
+ (process_definition_id,part_id,definition_code,operation_master_id,operation_description,source_type,
+  machine_type_id,cycle_time_seconds,clamping_time_seconds,setting_time_hours,outsource_cost_inr,
+  process_cost_inr,created_by)
+SELECT PO.process_operation_id,P.part_id,CONCAT('PD-',LPAD(PO.process_operation_id,4,'0')),
+  PO.operation_master_id,PO.operation_description,PO.source_type,PO.machine_type_id,
+  PO.cycle_time_seconds,PO.clamping_time_seconds,PO.setting_time_hours,PO.outsource_cost_inr,
+  PO.process_cost_inr,PO.created_by
+FROM part_process_operation PO
+JOIN part_process_plan P ON P.process_plan_id=PO.process_plan_id
+LEFT JOIN part_process_definition D ON D.process_definition_id=PO.process_operation_id
+WHERE D.process_definition_id IS NULL;
+
+UPDATE part_process_operation
+SET process_definition_id=process_operation_id
+WHERE process_definition_id IS NULL
+  AND process_operation_id>0;
+
+SET @has_process_definition_index := (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation' AND INDEX_NAME='ix_process_operation_definition'
+);
+SET @process_definition_index_sql := IF(@has_process_definition_index=0,
+  'ALTER TABLE part_process_operation ADD KEY ix_process_operation_definition (process_definition_id)',
+  'SELECT 1');
+PREPARE process_definition_index_statement FROM @process_definition_index_sql;
+EXECUTE process_definition_index_statement;
+DEALLOCATE PREPARE process_definition_index_statement;
+
+SET @has_process_definition_fk := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='part_process_operation'
+    AND CONSTRAINT_NAME='fk_process_operation_definition'
+);
+SET @process_definition_fk_sql := IF(@has_process_definition_fk=0,
+  'ALTER TABLE part_process_operation ADD CONSTRAINT fk_process_operation_definition FOREIGN KEY (process_definition_id) REFERENCES part_process_definition(process_definition_id) ON UPDATE CASCADE ON DELETE RESTRICT',
+  'SELECT 1');
+PREPARE process_definition_fk_statement FROM @process_definition_fk_sql;
+EXECUTE process_definition_fk_statement;
+DEALLOCATE PREPARE process_definition_fk_statement;
+
+-- ============================================================================
+-- Complete ISO tolerance grade ranges imported from Inspection Plan
+-- Source: tolerance-grade-master-data.sql
+-- ============================================================================
+
+-- ISO tolerance values imported from Inspection plan.xlsx / Tolerance grade master.
+-- Deviations are stored in microns and converted to millimetres by the API.
+INSERT INTO tolerance_grade_master
+ (grade_code,basic_size_from,basic_size_to,lower_deviation_microns,upper_deviation_microns) VALUES
+('H1',0,3,0,0.8),
+('H2',0,3,0,1.2),
+('H3',0,3,0,2),
+('H4',0,3,0,3),
+('H5',0,3,0,4),
+('H6',0,3,0,6),
+('H7',0,3,0,10),
+('H8',0,3,0,14),
+('H9',0,3,0,25),
+('H10',0,3,0,40),
+('H11',0,3,0,60),
+('H12',0,3,0,100),
+('H13',0,3,0,140),
+('H14',0,3,0,250),
+('H15',0,3,0,400),
+('H16',0,3,0,600),
+('H17',0,3,0,1000),
+('H18',0,3,0,1400),
+('H1',3,6,0,1),
+('H2',3,6,0,1.5),
+('H3',3,6,0,2.5),
+('H4',3,6,0,4),
+('H5',3,6,0,5),
+('H6',3,6,0,8),
+('H7',3,6,0,12),
+('H8',3,6,0,18),
+('H9',3,6,0,30),
+('H10',3,6,0,48),
+('H11',3,6,0,75),
+('H12',3,6,0,120),
+('H13',3,6,0,180),
+('H14',3,6,0,300),
+('H15',3,6,0,480),
+('H16',3,6,0,750),
+('H17',3,6,0,1200),
+('H18',3,6,0,1800),
+('H1',6,10,0,1),
+('H2',6,10,0,1.5),
+('H3',6,10,0,2.5),
+('H4',6,10,0,4),
+('H5',6,10,0,6),
+('H6',6,10,0,9),
+('H7',6,10,0,15),
+('H8',6,10,0,22),
+('H9',6,10,0,36),
+('H10',6,10,0,58),
+('H11',6,10,0,90),
+('H12',6,10,0,150),
+('H13',6,10,0,220),
+('H14',6,10,0,360),
+('H15',6,10,0,580),
+('H16',6,10,0,900),
+('H17',6,10,0,1500),
+('H18',6,10,0,2200),
+('H1',10,18,0,1.2),
+('H2',10,18,0,2),
+('H3',10,18,0,3),
+('H4',10,18,0,5),
+('H5',10,18,0,8),
+('H6',10,18,0,11),
+('H7',10,18,0,18),
+('H8',10,18,0,27),
+('H9',10,18,0,43),
+('H10',10,18,0,70),
+('H11',10,18,0,110),
+('H12',10,18,0,180),
+('H13',10,18,0,270),
+('H14',10,18,0,430),
+('H15',10,18,0,700),
+('H16',10,18,0,1100),
+('H17',10,18,0,1800),
+('H18',10,18,0,2700),
+('H1',18,30,0,1.5),
+('H2',18,30,0,2.5),
+('H3',18,30,0,4),
+('H4',18,30,0,6),
+('H5',18,30,0,9),
+('H6',18,30,0,13),
+('H7',18,30,0,21),
+('H8',18,30,0,33),
+('H9',18,30,0,52),
+('H10',18,30,0,84),
+('H11',18,30,0,130),
+('H12',18,30,0,210),
+('H13',18,30,0,330),
+('H14',18,30,0,520),
+('H15',18,30,0,840),
+('H16',18,30,0,1300),
+('H17',18,30,0,2100),
+('H18',18,30,0,3300),
+('H1',30,50,0,1.5),
+('H2',30,50,0,2.5),
+('H3',30,50,0,4),
+('H4',30,50,0,7),
+('H5',30,50,0,11),
+('H6',30,50,0,16),
+('H7',30,50,0,25),
+('H8',30,50,0,39),
+('H9',30,50,0,62),
+('H10',30,50,0,100),
+('H11',30,50,0,160),
+('H12',30,50,0,250),
+('H13',30,50,0,390),
+('H14',30,50,0,620),
+('H15',30,50,0,1000),
+('H16',30,50,0,1600),
+('H17',30,50,0,2500),
+('H18',30,50,0,3900),
+('H1',50,80,0,2),
+('H2',50,80,0,3),
+('H3',50,80,0,5),
+('H4',50,80,0,8),
+('H5',50,80,0,13),
+('H6',50,80,0,19),
+('H7',50,80,0,30),
+('H8',50,80,0,46),
+('H9',50,80,0,74),
+('H10',50,80,0,120),
+('H11',50,80,0,190),
+('H12',50,80,0,300),
+('H13',50,80,0,460),
+('H14',50,80,0,740),
+('H15',50,80,0,1200),
+('H16',50,80,0,1900),
+('H17',50,80,0,3000),
+('H18',50,80,0,4600),
+('H1',80,120,0,2.5),
+('H2',80,120,0,4),
+('H3',80,120,0,6),
+('H4',80,120,0,10),
+('H5',80,120,0,15),
+('H6',80,120,0,22),
+('H7',80,120,0,35),
+('H8',80,120,0,54),
+('H9',80,120,0,87),
+('H10',80,120,0,140),
+('H11',80,120,0,220),
+('H12',80,120,0,350),
+('H13',80,120,0,540),
+('H14',80,120,0,870),
+('H15',80,120,0,1400),
+('H16',80,120,0,2200),
+('H17',80,120,0,3500),
+('H18',80,120,0,5400),
+('H1',120,160,0,3.5),
+('H2',120,160,0,5),
+('H3',120,160,0,8),
+('H4',120,160,0,12),
+('H5',120,160,0,18),
+('H6',120,160,0,25),
+('H7',120,160,0,40),
+('H8',120,160,0,63),
+('H9',120,160,0,100),
+('H10',120,160,0,160),
+('H11',120,160,0,250),
+('H12',120,160,0,400),
+('H13',120,160,0,630),
+('H14',120,160,0,1000),
+('H15',120,160,0,1600),
+('H16',120,160,0,2500),
+('H17',120,160,0,4000),
+('H18',120,160,0,6300),
+('H1',160,180,0,3.5),
+('H2',160,180,0,5),
+('H3',160,180,0,8),
+('H4',160,180,0,12),
+('H5',160,180,0,18),
+('H6',160,180,0,25),
+('H7',160,180,0,40),
+('H8',160,180,0,63),
+('H9',160,180,0,100),
+('H10',160,180,0,160),
+('H11',160,180,0,250),
+('H12',160,180,0,400),
+('H13',160,180,0,630),
+('H14',160,180,0,1000),
+('H15',160,180,0,1600),
+('H16',160,180,0,2500),
+('H17',160,180,0,4000),
+('H18',160,180,0,6300),
+('H1',180,225,0,4.5),
+('H2',180,225,0,7),
+('H3',180,225,0,10),
+('H4',180,225,0,14),
+('H5',180,225,0,20),
+('H6',180,225,0,29),
+('H7',180,225,0,46),
+('H8',180,225,0,72),
+('H9',180,225,0,115),
+('H10',180,225,0,185),
+('H11',180,225,0,290),
+('H12',180,225,0,460),
+('H13',180,225,0,720),
+('H14',180,225,0,1150),
+('H15',180,225,0,1850),
+('H16',180,225,0,2900),
+('H17',180,225,0,4600),
+('H18',180,225,0,7200),
+('H1',225,250,0,4.5),
+('H2',225,250,0,7),
+('H3',225,250,0,10),
+('H4',225,250,0,14),
+('H5',225,250,0,20),
+('H6',225,250,0,29),
+('H7',225,250,0,46),
+('H8',225,250,0,72),
+('H9',225,250,0,115),
+('H10',225,250,0,185),
+('H11',225,250,0,290),
+('H12',225,250,0,460),
+('H13',225,250,0,720),
+('H14',225,250,0,1150),
+('H15',225,250,0,1850),
+('H16',225,250,0,2900),
+('H17',225,250,0,4600),
+('H18',225,250,0,7200),
+('H1',250,315,0,6),
+('H2',250,315,0,8),
+('H3',250,315,0,12),
+('H4',250,315,0,16),
+('H5',250,315,0,23),
+('H6',250,315,0,32),
+('H7',250,315,0,52),
+('H8',250,315,0,81),
+('H9',250,315,0,130),
+('H10',250,315,0,210),
+('H11',250,315,0,320),
+('H12',250,315,0,520),
+('H13',250,315,0,810),
+('H14',250,315,0,1300),
+('H15',250,315,0,2100),
+('H16',250,315,0,3200),
+('H17',250,315,0,5200),
+('H18',250,315,0,8100),
+('H1',315,400,0,7),
+('H2',315,400,0,9),
+('H3',315,400,0,13),
+('H4',315,400,0,18),
+('H5',315,400,0,25),
+('H6',315,400,0,36),
+('H7',315,400,0,57),
+('H8',315,400,0,89),
+('H9',315,400,0,140),
+('H10',315,400,0,230),
+('H11',315,400,0,360),
+('H12',315,400,0,570),
+('H13',315,400,0,890),
+('H14',315,400,0,1400),
+('H15',315,400,0,2300),
+('H16',315,400,0,3600),
+('H17',315,400,0,5700),
+('H18',315,400,0,8900),
+('H1',400,500,0,8),
+('H2',400,500,0,10),
+('H3',400,500,0,15),
+('H4',400,500,0,20),
+('H5',400,500,0,27),
+('H6',400,500,0,40),
+('H7',400,500,0,63),
+('H8',400,500,0,97),
+('H9',400,500,0,155),
+('H10',400,500,0,250),
+('H11',400,500,0,400),
+('H12',400,500,0,630),
+('H13',400,500,0,970),
+('H14',400,500,0,1550),
+('H15',400,500,0,2500),
+('H16',400,500,0,4000),
+('H17',400,500,0,6300),
+('H18',400,500,0,9700),
+('H1',500,630,0,9),
+('H2',500,630,0,11),
+('H3',500,630,0,16),
+('H4',500,630,0,22),
+('H5',500,630,0,32),
+('H6',500,630,0,44),
+('H7',500,630,0,70),
+('H8',500,630,0,110),
+('H9',500,630,0,175),
+('H10',500,630,0,280),
+('H11',500,630,0,440),
+('H12',500,630,0,700),
+('H13',500,630,0,1100),
+('H14',500,630,0,1750),
+('H15',500,630,0,2800),
+('H16',500,630,0,4400),
+('H17',500,630,0,7000),
+('H18',500,630,0,11000),
+('H1',630,800,0,10),
+('H2',630,800,0,13),
+('H3',630,800,0,18),
+('H4',630,800,0,25),
+('H5',630,800,0,36),
+('H6',630,800,0,50),
+('H7',630,800,0,80),
+('H8',630,800,0,125),
+('H9',630,800,0,200),
+('H10',630,800,0,320),
+('H11',630,800,0,500),
+('H12',630,800,0,800),
+('H13',630,800,0,1250),
+('H14',630,800,0,2000),
+('H15',630,800,0,3200),
+('H16',630,800,0,5000),
+('H17',630,800,0,8000),
+('H18',630,800,0,12500),
+('H1',800,1000,0,11),
+('H2',800,1000,0,15),
+('H3',800,1000,0,21),
+('H4',800,1000,0,28),
+('H5',800,1000,0,40),
+('H6',800,1000,0,56),
+('H7',800,1000,0,90),
+('H8',800,1000,0,140),
+('H9',800,1000,0,230),
+('H10',800,1000,0,360),
+('H11',800,1000,0,560),
+('H12',800,1000,0,900),
+('H13',800,1000,0,1400),
+('H14',800,1000,0,2300),
+('H15',800,1000,0,3600),
+('H16',800,1000,0,5600),
+('H17',800,1000,0,9000),
+('H18',800,1000,0,14000),
+('H1',1000,1250,0,13),
+('H2',1000,1250,0,18),
+('H3',1000,1250,0,24),
+('H4',1000,1250,0,33),
+('H5',1000,1250,0,47),
+('H6',1000,1250,0,66),
+('H7',1000,1250,0,105),
+('H8',1000,1250,0,165),
+('H9',1000,1250,0,260),
+('H10',1000,1250,0,420),
+('H11',1000,1250,0,660),
+('H12',1000,1250,0,1050),
+('H13',1000,1250,0,1650),
+('H14',1000,1250,0,2600),
+('H15',1000,1250,0,4200),
+('H16',1000,1250,0,6600),
+('H17',1000,1250,0,10500),
+('H18',1000,1250,0,16500),
+('H1',1250,1600,0,15),
+('H2',1250,1600,0,21),
+('H3',1250,1600,0,29),
+('H4',1250,1600,0,39),
+('H5',1250,1600,0,55),
+('H6',1250,1600,0,78),
+('H7',1250,1600,0,125),
+('H8',1250,1600,0,195),
+('H9',1250,1600,0,310),
+('H10',1250,1600,0,500),
+('H11',1250,1600,0,780),
+('H12',1250,1600,0,1250),
+('H13',1250,1600,0,1950),
+('H14',1250,1600,0,3100),
+('H15',1250,1600,0,5000),
+('H16',1250,1600,0,7800),
+('H17',1250,1600,0,12500),
+('H18',1250,1600,0,19500),
+('H1',1600,2000,0,18),
+('H2',1600,2000,0,25),
+('H3',1600,2000,0,35),
+('H4',1600,2000,0,46),
+('H5',1600,2000,0,65),
+('H6',1600,2000,0,92),
+('H7',1600,2000,0,150),
+('H8',1600,2000,0,230),
+('H9',1600,2000,0,370),
+('H10',1600,2000,0,600),
+('H11',1600,2000,0,920),
+('H12',1600,2000,0,1500),
+('H13',1600,2000,0,2300),
+('H14',1600,2000,0,3700),
+('H15',1600,2000,0,6000),
+('H16',1600,2000,0,9200),
+('H17',1600,2000,0,15000),
+('H18',1600,2000,0,23000),
+('H1',2000,2500,0,22),
+('H2',2000,2500,0,30),
+('H3',2000,2500,0,41),
+('H4',2000,2500,0,55),
+('H5',2000,2500,0,78),
+('H6',2000,2500,0,110),
+('H7',2000,2500,0,175),
+('H8',2000,2500,0,280),
+('H9',2000,2500,0,440),
+('H10',2000,2500,0,700),
+('H11',2000,2500,0,1100),
+('H12',2000,2500,0,1750),
+('H13',2000,2500,0,2800),
+('H14',2000,2500,0,4400),
+('H15',2000,2500,0,7000),
+('H16',2000,2500,0,11000),
+('H17',2000,2500,0,17500),
+('H18',2000,2500,0,28000),
+('H1',2500,3150,0,26),
+('H2',2500,3150,0,36),
+('H3',2500,3150,0,50),
+('H4',2500,3150,0,68),
+('H5',2500,3150,0,96),
+('H6',2500,3150,0,135),
+('H7',2500,3150,0,210),
+('H8',2500,3150,0,330),
+('H9',2500,3150,0,540),
+('H10',2500,3150,0,860),
+('H11',2500,3150,0,1350),
+('H12',2500,3150,0,2100),
+('H13',2500,3150,0,3300),
+('H14',2500,3150,0,5400),
+('H15',2500,3150,0,8600),
+('H16',2500,3150,0,13500),
+('H17',2500,3150,0,21000),
+('H18',2500,3150,0,33000)
+ON DUPLICATE KEY UPDATE lower_deviation_microns=VALUES(lower_deviation_microns),
+ upper_deviation_microns=VALUES(upper_deviation_microns),active_flag='Y';
+
+-- ============================================================================
+-- Marketing Enquiry workflow
+-- Source: marketing-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS marketing_enquiries (
+  enquiry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  doc_no VARCHAR(50) NOT NULL,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  customer_code_snapshot VARCHAR(50) NOT NULL,
+  customer_name_snapshot VARCHAR(200) NOT NULL,
+  customer_short_name_snapshot VARCHAR(100) NULL,
+  enquiry_mode VARCHAR(20) NOT NULL DEFAULT 'MAIL',
+  order_type VARCHAR(20) NOT NULL DEFAULT 'SALES',
+  required_date DATE NULL,
+  po_reference VARCHAR(100) NULL,
+  enquiry_status VARCHAR(30) NOT NULL DEFAULT 'ENQUIRED',
+  enquiry_conversion VARCHAR(30) NOT NULL DEFAULT 'YET_TO_RECEIVE',
+  current_stage VARCHAR(30) NOT NULL DEFAULT 'ENQUIRY',
+  revision_number VARCHAR(50) NULL,
+  revision_date DATE NULL,
+  save_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  remarks TEXT NULL,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  submitted_by VARCHAR(50) NULL,
+  submitted_on TIMESTAMP NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (enquiry_id),
+  UNIQUE KEY uq_marketing_enquiry_doc_no (doc_no),
+  KEY ix_marketing_enquiry_customer (customer_id),
+  KEY ix_marketing_enquiry_stage_status (current_stage, enquiry_status),
+  KEY ix_marketing_enquiry_created_on (created_on),
+  CONSTRAINT fk_marketing_enquiry_customer
+    FOREIGN KEY (customer_id) REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_enquiry_parts (
+  enquiry_part_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  part_id BIGINT UNSIGNED NULL,
+  line_number INT UNSIGNED NOT NULL,
+  part_number VARCHAR(100) NOT NULL,
+  item_code VARCHAR(100) NULL,
+  drawing_number VARCHAR(100) NOT NULL,
+  drawing_revision_number VARCHAR(50) NULL,
+  drawing_revision_date DATE NULL,
+  product_description VARCHAR(500) NOT NULL,
+  material_and_grade VARCHAR(300) NOT NULL,
+  alternative_material VARCHAR(300) NULL,
+  is_assembled_part TINYINT(1) NOT NULL DEFAULT 0,
+  required_quantity DECIMAL(14,3) NOT NULL DEFAULT 0,
+  annual_quantity DECIMAL(14,3) NULL,
+  moq DECIMAL(14,3) NULL,
+  required_date DATE NULL,
+  unit_of_measurement VARCHAR(30) NULL,
+  part_status VARCHAR(40) NOT NULL DEFAULT 'PENDING_FEASIBILITY',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (enquiry_part_id),
+  UNIQUE KEY uq_marketing_enquiry_line (enquiry_id, line_number),
+  KEY ix_marketing_enquiry_part_master (part_id),
+  KEY ix_marketing_enquiry_part_status (part_status, active_flag),
+  CONSTRAINT fk_marketing_enquiry_part_header
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_marketing_enquiry_part_master
+    FOREIGN KEY (part_id) REFERENCES part_master (part_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_enquiry_revisions (
+  enquiry_revision_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  revision_sequence INT UNSIGNED NOT NULL,
+  revision_number VARCHAR(50) NOT NULL,
+  revision_date DATE NOT NULL,
+  revision_action ENUM('CREATED', 'UPDATED', 'SUBMITTED', 'MIGRATED')
+    NOT NULL DEFAULT 'UPDATED',
+  save_status ENUM('DRAFT', 'SUBMITTED') NOT NULL,
+  snapshot_json JSON NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (enquiry_revision_id),
+  UNIQUE KEY uq_enquiry_revision (enquiry_id, revision_sequence),
+  KEY ix_enquiry_revision_date (enquiry_id, revision_date),
+  CONSTRAINT fk_enquiry_revision_enquiry
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO app_document_sequences
+  (sequence_key, financial_year, prefix, current_number, number_padding)
+VALUES
+  ('ENQUIRY', '2026-27', 'ENQ', 0, 4)
+ON DUPLICATE KEY UPDATE
+  prefix = VALUES(prefix),
+  number_padding = VALUES(number_padding);
+
+-- ============================================================================
+-- Feasibility, regret letters and shared reference values
+-- Source: feasibility-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS marketing_feasibilities (
+  feasibility_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  feasibility_date DATE NOT NULL,
+  communication_address TEXT NULL,
+  contact_person VARCHAR(200) NULL,
+  telephone_number VARCHAR(50) NULL,
+  fax_number VARCHAR(50) NULL,
+  email_address VARCHAR(200) NULL,
+  is_new_customer VARCHAR(3) NULL,
+  existing_products_details TEXT NULL,
+  similar_product_processing VARCHAR(3) NULL,
+  similar_product_details TEXT NULL,
+  drawing_reviewed_completely VARCHAR(3) NULL,
+  drawing_requirements_understood VARCHAR(3) NULL,
+  customer_clarification_required TEXT NULL,
+  product_technically_feasible VARCHAR(3) NULL,
+  raw_material_source VARCHAR(20) NULL,
+  purchase_source_available VARCHAR(3) NULL,
+  material_source_details TEXT NULL,
+  outsource_process_required VARCHAR(3) NULL,
+  outsource_source_details TEXT NULL,
+  tolerance_achievable VARCHAR(3) NULL,
+  acceptance_criteria_understood VARCHAR(3) NULL,
+  customer_special_characteristics VARCHAR(3) NULL,
+  special_characteristics_details TEXT NULL,
+  customer_final_inspection_format VARCHAR(3) NULL,
+  final_inspection_format_details TEXT NULL,
+  batch_supply_reports TEXT NULL,
+  customer_required_volume DECIMAL(14,3) NULL,
+  volume_uom VARCHAR(30) NULL,
+  statutory_requirements TEXT NULL,
+  customer_specified_packing VARCHAR(3) NULL,
+  packing_details TEXT NULL,
+  customer_specified_labelling VARCHAR(3) NULL,
+  labelling_details TEXT NULL,
+  transportation_mode VARCHAR(100) NULL,
+  customer_specified_transporter VARCHAR(3) NULL,
+  transporter_details TEXT NULL,
+  freight_paid_by VARCHAR(30) NULL,
+  payment_terms TEXT NULL,
+  feasibility_decision VARCHAR(30) NULL,
+  regret_reason TEXT NULL,
+  final_remarks TEXT NULL,
+  save_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  feasibility_check_completed_on DATETIME NULL,
+  closed_by_code VARCHAR(50) NULL,
+  closed_by_name VARCHAR(150) NULL,
+  closed_by_role VARCHAR(100) NULL,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  submitted_by VARCHAR(50) NULL,
+  submitted_on DATETIME NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (feasibility_id),
+  UNIQUE KEY uq_feasibility_enquiry_part (enquiry_part_id),
+  KEY ix_feasibility_enquiry (enquiry_id),
+  KEY ix_feasibility_status (save_status, feasibility_decision),
+  CONSTRAINT fk_feasibility_enquiry
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_feasibility_enquiry_part
+    FOREIGN KEY (enquiry_part_id) REFERENCES marketing_enquiry_parts (enquiry_part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_regret_letters (
+  regret_letter_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  feasibility_id BIGINT UNSIGNED NOT NULL,
+  letter_status VARCHAR(30) NOT NULL DEFAULT 'NOT_GENERATED',
+  regret_reason TEXT NOT NULL,
+  generated_on DATETIME NULL,
+  approved_on DATETIME NULL,
+  approved_by VARCHAR(50) NULL,
+  sent_on DATETIME NULL,
+  sent_by VARCHAR(50) NULL,
+  file_path VARCHAR(500) NULL,
+  letter_content LONGTEXT NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (regret_letter_id),
+  UNIQUE KEY uq_regret_letter_feasibility (feasibility_id),
+  KEY ix_regret_letter_enquiry (enquiry_id),
+  CONSTRAINT fk_regret_letter_enquiry
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_regret_letter_enquiry_part
+    FOREIGN KEY (enquiry_part_id) REFERENCES marketing_enquiry_parts (enquiry_part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_regret_letter_feasibility
+    FOREIGN KEY (feasibility_id) REFERENCES marketing_feasibilities (feasibility_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_reference_values (
+  reference_value_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  reference_type VARCHAR(50) NOT NULL,
+  value_code VARCHAR(100) NOT NULL,
+  display_label VARCHAR(150) NOT NULL,
+  numeric_value DECIMAL(18,6) NULL,
+  effective_date DATE NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (reference_value_id),
+  UNIQUE KEY uq_marketing_reference_value (reference_type, value_code),
+  KEY ix_marketing_reference_active (reference_type, active_flag, sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO marketing_reference_values
+  (reference_type, value_code, display_label, sort_order)
+VALUES
+  ('TRANSPORT_MODE', 'ROAD', 'Road', 10),
+  ('TRANSPORT_MODE', 'AIR', 'Air', 20),
+  ('TRANSPORT_MODE', 'SEA', 'Sea', 30),
+  ('TRANSPORT_MODE', 'COURIER', 'Courier', 40),
+  ('TRANSPORT_MODE', 'OTHER', 'Other', 50),
+  ('PAYMENT_TERM', 'ADVANCE', 'Advance Payment', 10),
+  ('PAYMENT_TERM', 'NET_30', 'Net 30 Days', 20),
+  ('PAYMENT_TERM', 'NET_45', 'Net 45 Days', 30),
+  ('PAYMENT_TERM', 'NET_60', 'Net 60 Days', 40),
+  ('PAYMENT_TERM', 'LC', 'Letter of Credit', 50),
+  ('PAYMENT_TERM', 'OTHER', 'Other', 60)
+ON DUPLICATE KEY UPDATE
+  display_label = VALUES(display_label),
+  sort_order = VALUES(sort_order),
+  active_flag = 'Y';
+
+-- ============================================================================
+-- Workout costing and assembled-part subparts
+-- Source: workout-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS marketing_workouts (
+  workout_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workout_no VARCHAR(50) NOT NULL,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  workout_date DATE NOT NULL,
+  reference_no VARCHAR(100) NULL,
+  currency_code VARCHAR(10) NOT NULL DEFAULT 'EUR',
+  currency_rate DECIMAL(16,6) NOT NULL DEFAULT 1,
+  exchange_rate_effective_date DATE NULL,
+  overhead_profit_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+  profit_calculation_type VARCHAR(20) NOT NULL DEFAULT 'FIXED_AMOUNT',
+  profit_value DECIMAL(18,4) NOT NULL DEFAULT 0,
+  commission_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+  payment_terms VARCHAR(500) NULL,
+  development_time VARCHAR(200) NULL,
+  pilot_batch_delivery VARCHAR(200) NULL,
+  item_code VARCHAR(100) NULL,
+  machining_drawing_number VARCHAR(100) NOT NULL,
+  revision_number VARCHAR(50) NULL,
+  description VARCHAR(500) NOT NULL,
+  annual_quantity DECIMAL(14,3) NULL,
+  required_quantity_snapshot DECIMAL(14,3) NULL,
+  moq DECIMAL(14,3) NULL,
+  material VARCHAR(300) NULL,
+  weight_kg DECIMAL(14,4) NOT NULL DEFAULT 0,
+  material_rate_per_kg DECIMAL(18,4) NOT NULL DEFAULT 0,
+  additional_material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  assembly_labour_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  material_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  turning_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  vmc_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  keyway_spline_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  heat_treatment_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  shaping_gear_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  packing_forwarding_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  total_machining_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  overhead_profit_amount_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  profit_amount_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  adjusted_machining_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  adjusted_machining_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  part_cost_with_overhead_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  part_cost_with_overhead_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  machining_cost_with_va_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  packing_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  part_price_fob_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  part_price_fob_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  commission_amount_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  commission_amount_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  final_part_price_fob_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  final_part_price_fob_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  pattern_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  fixture_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  special_tool_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  gauge_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  trial_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  total_development_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  total_development_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  save_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  submitted_by VARCHAR(50) NULL,
+  submitted_on TIMESTAMP NULL,
+  completed_by_name VARCHAR(200) NULL,
+  completed_by_role VARCHAR(100) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (workout_id),
+  UNIQUE KEY uq_marketing_workout_no (workout_no),
+  UNIQUE KEY uq_marketing_workout_part (enquiry_part_id),
+  KEY ix_marketing_workout_enquiry (enquiry_id),
+  CONSTRAINT fk_marketing_workout_enquiry
+    FOREIGN KEY (enquiry_id) REFERENCES marketing_enquiries (enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_marketing_workout_part
+    FOREIGN KEY (enquiry_part_id) REFERENCES marketing_enquiry_parts (enquiry_part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_workout_process_costs (
+  workout_process_cost_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workout_id BIGINT UNSIGNED NOT NULL,
+  process_type VARCHAR(50) NOT NULL,
+  process_description VARCHAR(300) NULL,
+  cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  display_order INT UNSIGNED NOT NULL DEFAULT 1,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (workout_process_cost_id),
+  KEY ix_marketing_workout_process (workout_id, display_order),
+  CONSTRAINT fk_marketing_workout_process
+    FOREIGN KEY (workout_id) REFERENCES marketing_workouts (workout_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_workout_notes (
+  workout_note_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workout_id BIGINT UNSIGNED NOT NULL,
+  note_text TEXT NOT NULL,
+  display_order INT UNSIGNED NOT NULL DEFAULT 1,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (workout_note_id),
+  KEY ix_marketing_workout_note (workout_id, display_order),
+  CONSTRAINT fk_marketing_workout_note
+    FOREIGN KEY (workout_id) REFERENCES marketing_workouts (workout_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_workout_subparts (
+  workout_subpart_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workout_id BIGINT UNSIGNED NOT NULL,
+  line_number INT UNSIGNED NOT NULL,
+  part_name VARCHAR(200) NULL,
+  part_drawing_number VARCHAR(100) NULL,
+  material_type VARCHAR(50) NULL,
+  material_and_grade VARCHAR(300) NULL,
+  material_price_per_kg DECIMAL(18,4) NOT NULL DEFAULT 0,
+  rm_weight_kg DECIMAL(14,4) NOT NULL DEFAULT 0,
+  material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  total_machining_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  pattern_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  fixture_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  special_tool_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  gauge_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  trial_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  total_development_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (workout_subpart_id),
+  UNIQUE KEY uq_workout_subpart_line (workout_id, line_number),
+  CONSTRAINT fk_workout_subpart_workout
+    FOREIGN KEY (workout_id) REFERENCES marketing_workouts (workout_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_workout_subpart_process_costs (
+  workout_subpart_process_cost_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  workout_subpart_id BIGINT UNSIGNED NOT NULL,
+  process_type VARCHAR(50) NOT NULL,
+  process_description VARCHAR(300) NULL,
+  cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  display_order INT UNSIGNED NOT NULL DEFAULT 1,
+  active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (workout_subpart_process_cost_id),
+  UNIQUE KEY uq_workout_subpart_process (workout_subpart_id, process_type),
+  KEY ix_workout_subpart_process_order (workout_subpart_id, display_order),
+  CONSTRAINT fk_workout_subpart_process_subpart
+    FOREIGN KEY (workout_subpart_id) REFERENCES marketing_workout_subparts (workout_subpart_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO marketing_reference_values
+  (reference_type, value_code, display_label, sort_order)
+VALUES
+  ('SUBPART_MATERIAL_TYPE', 'PURCHASE', 'Purchase', 10),
+  ('SUBPART_MATERIAL_TYPE', 'MANUFACTURING', 'Manufacturing', 20)
+ON DUPLICATE KEY UPDATE
+  display_label = VALUES(display_label),
+  sort_order = VALUES(sort_order),
+  active_flag = 'Y';
+
+INSERT INTO marketing_reference_values
+  (reference_type, value_code, display_label, sort_order)
+VALUES
+  ('MACHINING_PROCESS', 'TURNING', 'Turning', 10),
+  ('MACHINING_PROCESS', 'VMC', 'VMC', 20),
+  ('MACHINING_PROCESS', 'KEYWAY_SPLINE', 'Keyway / Spline', 30),
+  ('MACHINING_PROCESS', 'HEAT_TREATMENT', 'Heat Treatment', 40),
+  ('MACHINING_PROCESS', 'SHAPING_GEAR', 'Shaping / Gear', 50),
+  ('MACHINING_PROCESS', 'OTHER', 'Other Process', 60),
+  ('CURRENCY', 'INR', 'Indian Rupee', 10),
+  ('CURRENCY', 'EUR', 'Euro', 20),
+  ('CURRENCY', 'USD', 'US Dollar', 30),
+  ('CURRENCY', 'GBP', 'British Pound', 40)
+ON DUPLICATE KEY UPDATE
+  display_label = VALUES(display_label),
+  sort_order = VALUES(sort_order),
+  active_flag = 'Y';
+
+UPDATE marketing_reference_values
+SET numeric_value = CASE value_code
+  WHEN 'INR' THEN 1
+  WHEN 'EUR' THEN 85
+  WHEN 'USD' THEN 83
+  WHEN 'GBP' THEN 108
+END,
+effective_date = '2026-04-01'
+WHERE reference_type = 'CURRENCY'
+  AND numeric_value IS NULL;
+
+-- ============================================================================
+-- Quotation workflow and quotation notes
+-- Source: quotation-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS quotation_notes_master (
+  quotation_note_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  note_code VARCHAR(50) NOT NULL,
+  note_text TEXT NOT NULL,
+  default_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  sort_order INT UNSIGNED NOT NULL DEFAULT 1,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL DEFAULT 'SYSTEM',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (quotation_note_master_id),
+  UNIQUE KEY uq_quotation_note_code (note_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_quotations (
+  quotation_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  quotation_no VARCHAR(50) NOT NULL,
+  enquiry_id BIGINT UNSIGNED NOT NULL,
+  quotation_date DATE NOT NULL,
+  quote_for VARCHAR(200) NULL,
+  reference_no VARCHAR(100) NULL,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  customer_code_snapshot VARCHAR(50) NULL,
+  customer_name_snapshot VARCHAR(200) NOT NULL,
+  customer_address_snapshot TEXT NULL,
+  customer_email_snapshot VARCHAR(200) NULL,
+  salutation VARCHAR(100) NULL,
+  introduction TEXT NULL,
+  currency_code VARCHAR(10) NOT NULL,
+  revision_number VARCHAR(50) NULL,
+  revision_date DATE NULL,
+  quotation_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  pdf_status VARCHAR(20) NOT NULL DEFAULT 'NOT_GENERATED',
+  pdf_file_path VARCHAR(500) NULL,
+  pdf_generated_on TIMESTAMP NULL,
+  email_status VARCHAR(20) NOT NULL DEFAULT 'NOT_SENT',
+  email_to VARCHAR(500) NULL,
+  email_subject VARCHAR(500) NULL,
+  email_sent_on TIMESTAMP NULL,
+  email_sent_by VARCHAR(50) NULL,
+  email_failure_reason TEXT NULL,
+  finalized_by VARCHAR(50) NULL,
+  finalized_by_name VARCHAR(200) NULL,
+  finalized_by_role VARCHAR(100) NULL,
+  finalized_on TIMESTAMP NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  submitted_by VARCHAR(50) NULL,
+  submitted_on TIMESTAMP NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (quotation_id),
+  UNIQUE KEY uq_marketing_quotation_no (quotation_no),
+  UNIQUE KEY uq_marketing_quotation_enquiry_active (enquiry_id, active_flag),
+  CONSTRAINT fk_marketing_quotation_enquiry FOREIGN KEY (enquiry_id)
+    REFERENCES marketing_enquiries (enquiry_id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_marketing_quotation_customer FOREIGN KEY (customer_id)
+    REFERENCES customer_master (customer_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_quotation_items (
+  quotation_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  quotation_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  workout_id BIGINT UNSIGNED NOT NULL,
+  line_number INT UNSIGNED NOT NULL,
+  item_code VARCHAR(100) NULL,
+  machining_drawing_number VARCHAR(100) NOT NULL,
+  revision_number VARCHAR(50) NULL,
+  description VARCHAR(500) NOT NULL,
+  annual_quantity DECIMAL(14,3) NULL,
+  required_quantity DECIMAL(14,3) NULL,
+  moq DECIMAL(14,3) NOT NULL,
+  material VARCHAR(300) NULL,
+  weight_kg DECIMAL(14,4) NOT NULL,
+  currency_code VARCHAR(10) NOT NULL,
+  part_price_fob_inr DECIMAL(18,4) NOT NULL,
+  part_price_fob_foreign DECIMAL(18,4) NOT NULL,
+  total_development_cost_inr DECIMAL(18,4) NOT NULL,
+  total_development_cost_foreign DECIMAL(18,4) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (quotation_item_id),
+  UNIQUE KEY uq_quotation_item_part (quotation_id, enquiry_part_id),
+  CONSTRAINT fk_quotation_item_header FOREIGN KEY (quotation_id)
+    REFERENCES marketing_quotations (quotation_id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_quotation_item_part FOREIGN KEY (enquiry_part_id)
+    REFERENCES marketing_enquiry_parts (enquiry_part_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_quotation_item_workout FOREIGN KEY (workout_id)
+    REFERENCES marketing_workouts (workout_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_quotation_notes (
+  quotation_note_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  quotation_id BIGINT UNSIGNED NOT NULL,
+  note_text TEXT NOT NULL,
+  display_order INT UNSIGNED NOT NULL DEFAULT 1,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (quotation_note_id),
+  CONSTRAINT fk_quotation_note_header FOREIGN KEY (quotation_id)
+    REFERENCES marketing_quotations (quotation_id) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_quotation_emails (
+  quotation_email_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  quotation_id BIGINT UNSIGNED NOT NULL,
+  recipient_email VARCHAR(500) NOT NULL,
+  email_subject VARCHAR(500) NOT NULL,
+  email_body LONGTEXT NULL,
+  attachment_path VARCHAR(500) NULL,
+  email_status VARCHAR(20) NOT NULL,
+  provider_message_id VARCHAR(300) NULL,
+  failure_reason TEXT NULL,
+  sent_by VARCHAR(50) NOT NULL,
+  sent_on TIMESTAMP NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (quotation_email_id),
+  KEY ix_quotation_email_header (quotation_id, created_on),
+  CONSTRAINT fk_quotation_email_header FOREIGN KEY (quotation_id)
+    REFERENCES marketing_quotations (quotation_id) ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_regret_letter_emails (
+  regret_email_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  regret_letter_id BIGINT UNSIGNED NOT NULL,
+  enquiry_part_id BIGINT UNSIGNED NOT NULL,
+  recipient_email VARCHAR(255) NOT NULL,
+  email_subject VARCHAR(500) NOT NULL,
+  email_status ENUM('SENT', 'FAILED') NOT NULL,
+  provider_message_id VARCHAR(500) NULL,
+  failure_reason TEXT NULL,
+  attempted_by VARCHAR(50) NOT NULL,
+  attempted_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (regret_email_id),
+  KEY ix_regret_email_letter (regret_letter_id, attempted_on),
+  CONSTRAINT fk_regret_email_letter
+    FOREIGN KEY (regret_letter_id) REFERENCES marketing_regret_letters (regret_letter_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_regret_email_part
+    FOREIGN KEY (enquiry_part_id) REFERENCES marketing_enquiry_parts (enquiry_part_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO quotation_notes_master (note_code, note_text, default_flag, sort_order)
+VALUES
+ ('FOB_CHENNAI', 'Part prices are quoted FOB Chennai.', 'Y', 10),
+ ('PAYMENT_TERMS', 'Payment terms are 30 days from the date of Bill of Lading.', 'Y', 20),
+ ('MOQ', 'Supply quantity is subject to the MOQ stated against each item.', 'Y', 30),
+ ('CURRENCY', 'Prices are based on the quotation currency and exchange rate used in the completed Workout.', 'Y', 40),
+ ('PRICE_VALIDITY', 'This quotation is valid for 30 days from the quotation date.', 'Y', 50),
+ ('DEVELOPMENT', 'Development time and pilot batch delivery are as stated in the completed Workout.', 'Y', 60)
+ON DUPLICATE KEY UPDATE note_text=VALUES(note_text), sort_order=VALUES(sort_order), active_flag='Y';
+
+INSERT INTO app_document_sequences (sequence_key, financial_year, prefix, current_number, number_padding)
+VALUES ('QUOTATION', '2026-27', 'QUO', 0, 4)
+ON DUPLICATE KEY UPDATE prefix=VALUES(prefix), number_padding=VALUES(number_padding);
+
+-- ============================================================================
+-- Project-wide dropdown masters and Material/Grade/UOM relationships
+-- Source: project-reference-masters-migration.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS material_grade_master (
+  material_grade_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  material_id BIGINT UNSIGNED NOT NULL,
+  grade_code VARCHAR(50) NOT NULL,
+  grade_name VARCHAR(120) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (material_grade_id),
+  UNIQUE KEY uq_material_grade (material_id, grade_code),
+  CONSTRAINT fk_material_grade_material FOREIGN KEY (material_id)
+    REFERENCES material_master(material_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO uom_master (uom_code,uom_name) VALUES
+ ('KG','Kilogram'),('GRAM','Gram'),('NOS','Numbers'),('MM','Millimetre'),('MTR','Metre')
+ON DUPLICATE KEY UPDATE uom_name=VALUES(uom_name),active_flag='Y';
+
+INSERT INTO material_master (material_name) VALUES
+ ('Mild Steel'),('Stainless Steel'),('Aluminium'),('Cast Iron')
+ON DUPLICATE KEY UPDATE active_flag='Y';
+
+INSERT INTO material_grade_master (material_id,grade_code,grade_name)
+SELECT material_id,'IS2062','IS 2062' FROM material_master WHERE material_name='Mild Steel'
+UNION ALL SELECT material_id,'EN8','EN8' FROM material_master WHERE material_name='Mild Steel'
+UNION ALL SELECT material_id,'EN19','EN19' FROM material_master WHERE material_name='Mild Steel'
+UNION ALL SELECT material_id,'SS304','SS 304' FROM material_master WHERE material_name='Stainless Steel'
+ON DUPLICATE KEY UPDATE grade_name=VALUES(grade_name),active_flag='Y';
+
+INSERT INTO marketing_reference_values (reference_type,value_code,display_label,sort_order) VALUES
+ ('CUSTOMER_PARTY_TYPE','CUSTOMER','Customer',10),('CUSTOMER_PARTY_TYPE','SUPPLIER','Supplier',20),('CUSTOMER_PARTY_TYPE','BOTH','Both',30),
+ ('RECORD_STATUS','ACTIVE','Active',10),('RECORD_STATUS','INACTIVE','Inactive',20),
+ ('INVOICE_TYPE','TAX_INVOICE','Tax Invoice',10),('INVOICE_TYPE','LABOUR_INVOICE','Labour Invoice',20),('INVOICE_TYPE','EXPORT_INVOICE','Export Invoice',30),
+ ('CUSTOMER_ATTACHMENT_TYPE','NDA','NDA',10),('CUSTOMER_ATTACHMENT_TYPE','AGREEMENT','Agreement',20),('CUSTOMER_ATTACHMENT_TYPE','GST_CERTIFICATE','GST Certificate',30),('CUSTOMER_ATTACHMENT_TYPE','PAN_CARD','PAN Card',40),('CUSTOMER_ATTACHMENT_TYPE','OTHER','Other',50),
+ ('PART_CATEGORY','MACHINING','Machining',10),('PART_CATEGORY','ASSEMBLY','Assembly',20),
+ ('DRAWING_CODE_MODE','AUTO_GENERATED','Auto Generated',10),('DRAWING_CODE_MODE','MANUAL','Manual',20),
+ ('PART_ATTACHMENT_TYPE','CUSTOMER_DRAWING','Customer Drawing',10),('PART_ATTACHMENT_TYPE','CUSTOMER_STANDARD','Customer Standard',20),('PART_ATTACHMENT_TYPE','OTHER','Other',30),
+ ('ENQUIRY_MODE','MAIL','Mail',10),('ENQUIRY_MODE','ORAL','Oral',20),('ENQUIRY_MODE','VISIT','Visit',30),
+ ('ORDER_TYPE','SALES','Sales',10),('ORDER_TYPE','LABOUR','Labour',20),
+ ('ENQUIRY_STATUS_TRANSITION','QUOTED','Quoted',10),('ENQUIRY_STATUS_TRANSITION','ORDER_RECEIVED','Order Received',20),
+ ('YES_NO','N','No',10),('YES_NO','Y','Yes',20),
+ ('DOCUMENT_TYPE','IMAGE','Image',10),('DOCUMENT_TYPE','DRAWING','Drawing',20),('DOCUMENT_TYPE','DATASHEET','Datasheet',30),('DOCUMENT_TYPE','OTHER','Other',40),
+ ('PROFIT_CALCULATION_TYPE','FIXED_AMOUNT','Fixed Amount',10),('PROFIT_CALCULATION_TYPE','PERCENTAGE','Percentage',20)
+ON DUPLICATE KEY UPDATE display_label=VALUES(display_label),sort_order=VALUES(sort_order),active_flag='Y';
+
+ALTER TABLE part_master ADD COLUMN material_id BIGINT UNSIGNED NULL AFTER material_specification;
+ALTER TABLE part_master ADD COLUMN material_grade_id BIGINT UNSIGNED NULL AFTER material_id;
+ALTER TABLE part_master ADD COLUMN uom_id BIGINT UNSIGNED NULL AFTER unit_of_measurement;
+ALTER TABLE part_master ADD KEY ix_part_material (material_id);
+ALTER TABLE part_master ADD KEY ix_part_material_grade (material_grade_id);
+ALTER TABLE part_master ADD KEY ix_part_uom (uom_id);
+ALTER TABLE part_master ADD CONSTRAINT fk_part_material FOREIGN KEY(material_id) REFERENCES material_master(material_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE part_master ADD CONSTRAINT fk_part_material_grade FOREIGN KEY(material_grade_id) REFERENCES material_grade_master(material_grade_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE part_master ADD CONSTRAINT fk_part_uom FOREIGN KEY(uom_id) REFERENCES uom_master(uom_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+UPDATE part_master P JOIN uom_master U ON U.uom_code=CASE WHEN P.unit_of_measurement='KGS' THEN 'KG' ELSE P.unit_of_measurement END SET P.uom_id=U.uom_id WHERE P.uom_id IS NULL;
+
+-- ============================================================================
+-- Process Plan links for Workouts and Quotations
+-- Source: process-plan-consumer-links-migration.sql
+-- ============================================================================
+
+-- Preserve the selected Process Plan Variant in costing and quotation transactions.
+
+SET @has_workout_process_plan := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='marketing_workouts' AND COLUMN_NAME='process_plan_id'
+);
+SET @workout_process_plan_sql := IF(@has_workout_process_plan=0,
+  'ALTER TABLE marketing_workouts ADD COLUMN process_plan_id BIGINT UNSIGNED NULL AFTER enquiry_part_id',
+  'SELECT 1');
+PREPARE workout_process_plan_statement FROM @workout_process_plan_sql;
+EXECUTE workout_process_plan_statement;
+DEALLOCATE PREPARE workout_process_plan_statement;
+
+SET @has_workout_process_plan_index := (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='marketing_workouts' AND INDEX_NAME='ix_workout_process_plan'
+);
+SET @workout_process_plan_index_sql := IF(@has_workout_process_plan_index=0,
+  'ALTER TABLE marketing_workouts ADD KEY ix_workout_process_plan (process_plan_id)',
+  'SELECT 1');
+PREPARE workout_process_plan_index_statement FROM @workout_process_plan_index_sql;
+EXECUTE workout_process_plan_index_statement;
+DEALLOCATE PREPARE workout_process_plan_index_statement;
+
+SET @has_workout_process_plan_fk := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='marketing_workouts'
+    AND CONSTRAINT_NAME='fk_workout_process_plan'
+);
+SET @workout_process_plan_fk_sql := IF(@has_workout_process_plan_fk=0,
+  'ALTER TABLE marketing_workouts ADD CONSTRAINT fk_workout_process_plan FOREIGN KEY (process_plan_id) REFERENCES part_process_plan(process_plan_id) ON UPDATE CASCADE ON DELETE RESTRICT',
+  'SELECT 1');
+PREPARE workout_process_plan_fk_statement FROM @workout_process_plan_fk_sql;
+EXECUTE workout_process_plan_fk_statement;
+DEALLOCATE PREPARE workout_process_plan_fk_statement;
+
+UPDATE marketing_workouts W
+JOIN marketing_enquiry_parts EP ON EP.enquiry_part_id=W.enquiry_part_id
+JOIN part_process_plan PP ON PP.part_id=EP.part_id AND PP.is_default='Y' AND PP.active_flag='Y'
+SET W.process_plan_id=PP.process_plan_id
+WHERE W.process_plan_id IS NULL
+  AND W.workout_id>0;
+
+SET @has_quotation_process_plan := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='marketing_quotation_items' AND COLUMN_NAME='process_plan_id'
+);
+SET @quotation_process_plan_sql := IF(@has_quotation_process_plan=0,
+  'ALTER TABLE marketing_quotation_items ADD COLUMN process_plan_id BIGINT UNSIGNED NULL AFTER workout_id',
+  'SELECT 1');
+PREPARE quotation_process_plan_statement FROM @quotation_process_plan_sql;
+EXECUTE quotation_process_plan_statement;
+DEALLOCATE PREPARE quotation_process_plan_statement;
+
+SET @has_quotation_process_plan_index := (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='marketing_quotation_items' AND INDEX_NAME='ix_quotation_item_process_plan'
+);
+SET @quotation_process_plan_index_sql := IF(@has_quotation_process_plan_index=0,
+  'ALTER TABLE marketing_quotation_items ADD KEY ix_quotation_item_process_plan (process_plan_id)',
+  'SELECT 1');
+PREPARE quotation_process_plan_index_statement FROM @quotation_process_plan_index_sql;
+EXECUTE quotation_process_plan_index_statement;
+DEALLOCATE PREPARE quotation_process_plan_index_statement;
+
+SET @has_quotation_process_plan_fk := (
+  SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='marketing_quotation_items'
+    AND CONSTRAINT_NAME='fk_quotation_item_process_plan'
+);
+SET @quotation_process_plan_fk_sql := IF(@has_quotation_process_plan_fk=0,
+  'ALTER TABLE marketing_quotation_items ADD CONSTRAINT fk_quotation_item_process_plan FOREIGN KEY (process_plan_id) REFERENCES part_process_plan(process_plan_id) ON UPDATE CASCADE ON DELETE RESTRICT',
+  'SELECT 1');
+PREPARE quotation_process_plan_fk_statement FROM @quotation_process_plan_fk_sql;
+EXECUTE quotation_process_plan_fk_statement;
+DEALLOCATE PREPARE quotation_process_plan_fk_statement;
+
+UPDATE marketing_quotation_items QI
+JOIN marketing_workouts W ON W.workout_id=QI.workout_id
+SET QI.process_plan_id=W.process_plan_id
+WHERE QI.process_plan_id IS NULL
+  AND QI.quotation_item_id>0;
+
+-- ============================================================================
+-- Purchase Request, Approval, Enquiry and Supplier Quotation workflow
+-- Source: purchase-schema.sql
+-- ============================================================================
+
+-- ============================================================================
+-- PURCHASE MODULE
+-- Purchase Request -> PR Approval -> Purchase Enquiry -> Supplier Quotations
+-- Target: MySQL 8.0+
+-- Notes:
+--   * Suppliers are customer_master rows with party_type SUPPLIER or BOTH.
+--   * Item description/specification are copied from Item Master as snapshots.
+--   * No budget tables or budget columns are included.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS purchase_requests (
+  purchase_request_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  pr_number VARCHAR(50) NOT NULL,
+  financial_year VARCHAR(10) NOT NULL,
+  plant_code VARCHAR(50) NOT NULL,
+  floor_department VARCHAR(120) NOT NULL,
+  requested_by VARCHAR(100) NOT NULL,
+  request_date DATE NOT NULL,
+  required_date DATE NOT NULL,
+  requisition_type ENUM('NEW_ITEM','EXISTING_ITEM') NOT NULL,
+  priority ENUM('NORMAL','HIGH','EMERGENCY') NOT NULL DEFAULT 'NORMAL',
+  preferred_supplier_id BIGINT UNSIGNED NULL,
+  quote_reference VARCHAR(150) NULL,
+  remarks VARCHAR(1000) NULL,
+  estimated_subtotal DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  estimated_tax_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  estimated_total_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  pr_status ENUM(
+    'DRAFT','SUBMITTED','PENDING_APPROVAL','APPROVED',
+    'RETURNED','REJECTED','CANCELLED'
+  ) NOT NULL DEFAULT 'DRAFT',
+  submitted_on DATETIME NULL,
+  approved_by VARCHAR(100) NULL,
+  approved_on DATETIME NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_request_id),
+  UNIQUE KEY uq_purchase_request_number (pr_number),
+  KEY ix_purchase_request_queue (pr_status, priority, required_date, submitted_on),
+  KEY ix_purchase_request_plant_department (plant_code, floor_department),
+  KEY ix_purchase_request_requester (requested_by),
+  KEY ix_purchase_request_preferred_supplier (preferred_supplier_id),
+  CONSTRAINT fk_purchase_request_preferred_supplier FOREIGN KEY (preferred_supplier_id)
+    REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_purchase_request_dates CHECK (required_date >= request_date),
+  CONSTRAINT chk_purchase_request_amounts CHECK (
+    estimated_subtotal >= 0 AND estimated_tax_amount >= 0 AND estimated_total_amount >= 0
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_request_items (
+  purchase_request_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_request_id BIGINT UNSIGNED NOT NULL,
+  line_number INT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  item_group_name VARCHAR(120) NOT NULL,
+  item_type_name VARCHAR(120) NOT NULL,
+  item_description VARCHAR(250) NOT NULL,
+  item_specification VARCHAR(1000) NULL,
+  requested_quantity DECIMAL(18,3) NOT NULL,
+  uom_code VARCHAR(30) NOT NULL,
+  estimated_rate_per_qty DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  tax_percent DECIMAL(7,4) NOT NULL DEFAULT 0.0000,
+  estimated_tax_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  estimated_total_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  hsn_code VARCHAR(20) NULL,
+  purpose VARCHAR(1000) NOT NULL,
+  line_status ENUM('ACTIVE','CANCELLED') NOT NULL DEFAULT 'ACTIVE',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_request_item_id),
+  UNIQUE KEY uq_purchase_request_line (purchase_request_id, line_number),
+  KEY ix_purchase_request_item_master (item_id),
+  CONSTRAINT fk_purchase_request_item_header FOREIGN KEY (purchase_request_id)
+    REFERENCES purchase_requests (purchase_request_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_request_item_master FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_purchase_request_item_qty CHECK (requested_quantity > 0),
+  CONSTRAINT chk_purchase_request_item_values CHECK (
+    estimated_rate_per_qty >= 0 AND tax_percent >= 0 AND
+    estimated_tax_amount >= 0 AND estimated_total_amount >= 0
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_request_item_attachments (
+  purchase_request_item_attachment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_request_item_id BIGINT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_url VARCHAR(1000) NOT NULL,
+  mime_type VARCHAR(120) NULL,
+  file_size_bytes BIGINT UNSIGNED NULL,
+  uploaded_by VARCHAR(50) NOT NULL,
+  uploaded_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_request_item_attachment_id),
+  KEY ix_pr_item_attachment_line (purchase_request_item_id),
+  CONSTRAINT fk_pr_item_attachment_line FOREIGN KEY (purchase_request_item_id)
+    REFERENCES purchase_request_items (purchase_request_item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_request_approval_history (
+  purchase_request_approval_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_request_id BIGINT UNSIGNED NOT NULL,
+  decision ENUM('SUBMITTED','APPROVED','RETURNED','REJECTED','RESUBMITTED') NOT NULL,
+  decision_reason VARCHAR(1000) NULL,
+  decided_by VARCHAR(100) NOT NULL,
+  decided_on DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  from_status VARCHAR(40) NULL,
+  to_status VARCHAR(40) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_request_approval_id),
+  KEY ix_pr_approval_history_request (purchase_request_id, decided_on),
+  CONSTRAINT fk_pr_approval_history_request FOREIGN KEY (purchase_request_id)
+    REFERENCES purchase_requests (purchase_request_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT chk_pr_approval_reason CHECK (
+    decision NOT IN ('RETURNED','REJECTED') OR
+    (decision_reason IS NOT NULL AND CHAR_LENGTH(TRIM(decision_reason)) > 0)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_enquiries (
+  purchase_enquiry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enquiry_number VARCHAR(50) NOT NULL,
+  financial_year VARCHAR(10) NOT NULL,
+  enquiry_date DATE NOT NULL,
+  quote_due_date DATE NOT NULL,
+  enquiry_status ENUM(
+    'DRAFT','SENT','PARTIALLY_QUOTED','QUOTED','UNDER_NEGOTIATION','CLOSED','CANCELLED'
+  ) NOT NULL DEFAULT 'DRAFT',
+  remarks VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_enquiry_id),
+  UNIQUE KEY uq_purchase_enquiry_number (enquiry_number),
+  KEY ix_purchase_enquiry_status_due (enquiry_status, quote_due_date),
+  CONSTRAINT chk_purchase_enquiry_dates CHECK (quote_due_date >= enquiry_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_enquiry_requests (
+  purchase_enquiry_request_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_enquiry_id BIGINT UNSIGNED NOT NULL,
+  purchase_request_id BIGINT UNSIGNED NOT NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_enquiry_request_id),
+  UNIQUE KEY uq_purchase_enquiry_request (purchase_enquiry_id, purchase_request_id),
+  KEY ix_purchase_enquiry_request_pr (purchase_request_id),
+  CONSTRAINT fk_purchase_enquiry_request_header FOREIGN KEY (purchase_enquiry_id)
+    REFERENCES purchase_enquiries (purchase_enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_enquiry_request_pr FOREIGN KEY (purchase_request_id)
+    REFERENCES purchase_requests (purchase_request_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_enquiry_items (
+  purchase_enquiry_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_enquiry_id BIGINT UNSIGNED NOT NULL,
+  purchase_request_item_id BIGINT UNSIGNED NOT NULL,
+  line_number INT UNSIGNED NOT NULL,
+  enquiry_quantity DECIMAL(18,3) NOT NULL,
+  uom_code VARCHAR(30) NOT NULL,
+  enquiry_required ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  bypass_reason VARCHAR(500) NULL,
+  line_status ENUM('READY','SENT','PARTIALLY_QUOTED','QUOTED','SELECTED','CANCELLED') NOT NULL DEFAULT 'READY',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_enquiry_item_id),
+  UNIQUE KEY uq_purchase_enquiry_item_source (purchase_enquiry_id, purchase_request_item_id),
+  UNIQUE KEY uq_purchase_enquiry_item_line (purchase_enquiry_id, line_number),
+  KEY ix_purchase_enquiry_item_pr_line (purchase_request_item_id),
+  CONSTRAINT fk_purchase_enquiry_item_header FOREIGN KEY (purchase_enquiry_id)
+    REFERENCES purchase_enquiries (purchase_enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_enquiry_item_pr_line FOREIGN KEY (purchase_request_item_id)
+    REFERENCES purchase_request_items (purchase_request_item_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_purchase_enquiry_item_qty CHECK (enquiry_quantity > 0),
+  CONSTRAINT chk_purchase_enquiry_bypass CHECK (
+    enquiry_required = 'Y' OR
+    (bypass_reason IS NOT NULL AND CHAR_LENGTH(TRIM(bypass_reason)) > 0)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_enquiry_item_suppliers (
+  purchase_enquiry_item_supplier_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_enquiry_item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  assignment_status ENUM('ASSIGNED','SENT','REMINDER_SENT','QUOTED','DECLINED','NO_RESPONSE') NOT NULL DEFAULT 'ASSIGNED',
+  assigned_by VARCHAR(50) NOT NULL,
+  assigned_on DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_on DATETIME NULL,
+  last_reminder_on DATETIME NULL,
+  reminder_count INT UNSIGNED NOT NULL DEFAULT 0,
+  supplier_email VARCHAR(200) NULL,
+  remarks VARCHAR(500) NULL,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_enquiry_item_supplier_id),
+  UNIQUE KEY uq_purchase_enquiry_item_supplier (purchase_enquiry_item_id, supplier_id),
+  KEY ix_purchase_enquiry_supplier_party (supplier_id),
+  KEY ix_purchase_enquiry_supplier_status (assignment_status, sent_on),
+  CONSTRAINT fk_purchase_enquiry_supplier_item FOREIGN KEY (purchase_enquiry_item_id)
+    REFERENCES purchase_enquiry_items (purchase_enquiry_item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_enquiry_supplier_party FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS supplier_quotations (
+  supplier_quotation_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_enquiry_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  supplier_quotation_number VARCHAR(100) NULL,
+  supplier_quotation_date DATE NULL,
+  received_on DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revision_number INT UNSIGNED NOT NULL DEFAULT 1,
+  quotation_status ENUM('RECEIVED','REVISED','NEGOTIATING','FINAL','REJECTED','WITHDRAWN') NOT NULL DEFAULT 'RECEIVED',
+  currency_code VARCHAR(10) NOT NULL DEFAULT 'INR',
+  payment_terms VARCHAR(500) NULL,
+  delivery_terms VARCHAR(500) NULL,
+  quotation_valid_until DATE NULL,
+  subtotal_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  tax_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  grand_total_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  attachment_file_name VARCHAR(255) NULL,
+  attachment_file_url VARCHAR(1000) NULL,
+  remarks VARCHAR(1000) NULL,
+  entered_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (supplier_quotation_id),
+  UNIQUE KEY uq_supplier_quotation_revision (purchase_enquiry_id, supplier_id, revision_number),
+  KEY ix_supplier_quotation_supplier (supplier_id),
+  KEY ix_supplier_quotation_status (quotation_status, received_on),
+  CONSTRAINT fk_supplier_quotation_enquiry FOREIGN KEY (purchase_enquiry_id)
+    REFERENCES purchase_enquiries (purchase_enquiry_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_supplier_quotation_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_supplier_quotation_amounts CHECK (
+    subtotal_amount >= 0 AND tax_amount >= 0 AND grand_total_amount >= 0
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS supplier_quotation_items (
+  supplier_quotation_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  supplier_quotation_id BIGINT UNSIGNED NOT NULL,
+  purchase_enquiry_item_id BIGINT UNSIGNED NOT NULL,
+  quote_response ENUM('QUOTED','NOT_QUOTED') NOT NULL DEFAULT 'QUOTED',
+  quoted_quantity DECIMAL(18,3) NULL,
+  unit_price DECIMAL(18,4) NULL,
+  tax_percent DECIMAL(7,4) NULL,
+  tax_amount DECIMAL(18,2) NULL,
+  total_amount DECIMAL(18,2) NULL,
+  delivery_date DATE NULL,
+  delivery_lead_days INT UNSIGNED NULL,
+  offered_make_brand VARCHAR(200) NULL,
+  payment_terms VARCHAR(500) NULL,
+  item_remarks VARCHAR(1000) NULL,
+  quality_rating_snapshot DECIMAL(5,2) NULL,
+  previous_rating_snapshot DECIMAL(5,2) NULL,
+  comparison_score DECIMAL(8,4) NULL,
+  recommended_flag ENUM('Y','N') NOT NULL DEFAULT 'N',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (supplier_quotation_item_id),
+  UNIQUE KEY uq_supplier_quotation_item (supplier_quotation_id, purchase_enquiry_item_id),
+  KEY ix_supplier_quote_item_enquiry_line (purchase_enquiry_item_id),
+  KEY ix_supplier_quote_item_recommended (purchase_enquiry_item_id, recommended_flag, comparison_score),
+  CONSTRAINT fk_supplier_quote_item_header FOREIGN KEY (supplier_quotation_id)
+    REFERENCES supplier_quotations (supplier_quotation_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_supplier_quote_item_enquiry_line FOREIGN KEY (purchase_enquiry_item_id)
+    REFERENCES purchase_enquiry_items (purchase_enquiry_item_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_supplier_quote_item_values CHECK (
+    (quote_response = 'NOT_QUOTED' AND unit_price IS NULL AND total_amount IS NULL) OR
+    (quote_response = 'QUOTED' AND quoted_quantity > 0 AND unit_price >= 0 AND total_amount >= 0)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS supplier_quotation_negotiation_history (
+  supplier_quotation_negotiation_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  supplier_quotation_id BIGINT UNSIGNED NOT NULL,
+  negotiation_round INT UNSIGNED NOT NULL,
+  negotiation_note VARCHAR(2000) NOT NULL,
+  previous_total_amount DECIMAL(18,2) NULL,
+  revised_total_amount DECIMAL(18,2) NULL,
+  recorded_by VARCHAR(50) NOT NULL,
+  recorded_on DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (supplier_quotation_negotiation_id),
+  UNIQUE KEY uq_supplier_quotation_negotiation_round (supplier_quotation_id, negotiation_round),
+  CONSTRAINT fk_supplier_quotation_negotiation_header FOREIGN KEY (supplier_quotation_id)
+    REFERENCES supplier_quotations (supplier_quotation_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_supplier_selections (
+  purchase_supplier_selection_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_enquiry_item_id BIGINT UNSIGNED NOT NULL,
+  supplier_quotation_item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  selected_quantity DECIMAL(18,3) NOT NULL,
+  selection_reason VARCHAR(1000) NULL,
+  manager_decision ENUM('SELECTED','CANCELLED') NOT NULL DEFAULT 'SELECTED',
+  selected_by VARCHAR(50) NOT NULL,
+  selected_on DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_supplier_selection_id),
+  UNIQUE KEY uq_purchase_supplier_selection (purchase_enquiry_item_id, supplier_quotation_item_id),
+  KEY ix_purchase_supplier_selection_supplier (supplier_id),
+  CONSTRAINT fk_purchase_supplier_selection_item FOREIGN KEY (purchase_enquiry_item_id)
+    REFERENCES purchase_enquiry_items (purchase_enquiry_item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_supplier_selection_quote_item FOREIGN KEY (supplier_quotation_item_id)
+    REFERENCES supplier_quotation_items (supplier_quotation_item_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_purchase_supplier_selection_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT chk_purchase_supplier_selection_qty CHECK (selected_quantity > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE OR REPLACE VIEW vw_purchase_request_approval_queue AS
+SELECT
+  PR.purchase_request_id,
+  PR.pr_number,
+  PR.plant_code,
+  PR.floor_department,
+  PR.requested_by,
+  PR.requisition_type,
+  PR.priority,
+  PR.submitted_on,
+  PR.required_date,
+  PR.estimated_total_amount,
+  PR.pr_status,
+  COUNT(PRI.purchase_request_item_id) AS item_count
+FROM purchase_requests PR
+LEFT JOIN purchase_request_items PRI
+  ON PRI.purchase_request_id = PR.purchase_request_id
+ AND PRI.line_status = 'ACTIVE'
+WHERE PR.pr_status IN ('SUBMITTED','PENDING_APPROVAL','RETURNED')
+GROUP BY
+  PR.purchase_request_id, PR.pr_number, PR.plant_code, PR.floor_department,
+  PR.requested_by, PR.requisition_type, PR.priority, PR.submitted_on,
+  PR.required_date, PR.estimated_total_amount, PR.pr_status;
+
+CREATE OR REPLACE VIEW vw_purchase_enquiry_quote_comparison AS
+SELECT
+  PE.purchase_enquiry_id,
+  PE.enquiry_number,
+  PEI.purchase_enquiry_item_id,
+  PRI.purchase_request_item_id,
+  PR.pr_number,
+  PRI.item_type_name,
+  PRI.item_description,
+  PEI.enquiry_quantity,
+  PEI.uom_code,
+  SQ.supplier_quotation_id,
+  SQ.supplier_id,
+  CM.customer_code AS supplier_code,
+  CM.customer_name AS supplier_name,
+  SQI.quote_response,
+  SQI.unit_price,
+  SQI.tax_percent,
+  SQI.total_amount,
+  SQI.delivery_date,
+  SQI.delivery_lead_days,
+  COALESCE(SQI.payment_terms, SQ.payment_terms) AS payment_terms,
+  SQI.quality_rating_snapshot,
+  SQI.previous_rating_snapshot,
+  SQI.comparison_score,
+  SQI.recommended_flag,
+  SQ.attachment_file_name,
+  SQ.attachment_file_url
+FROM purchase_enquiries PE
+JOIN purchase_enquiry_items PEI
+  ON PEI.purchase_enquiry_id = PE.purchase_enquiry_id
+JOIN purchase_request_items PRI
+  ON PRI.purchase_request_item_id = PEI.purchase_request_item_id
+JOIN purchase_requests PR
+  ON PR.purchase_request_id = PRI.purchase_request_id
+LEFT JOIN supplier_quotation_items SQI
+  ON SQI.purchase_enquiry_item_id = PEI.purchase_enquiry_item_id
+LEFT JOIN supplier_quotations SQ
+  ON SQ.supplier_quotation_id = SQI.supplier_quotation_id
+LEFT JOIN customer_master CM
+  ON CM.customer_id = SQ.supplier_id;
+
+INSERT INTO app_document_sequences
+  (sequence_key, financial_year, prefix, current_number, number_padding)
+VALUES
+  ('PURCHASE_REQUEST', '2026-27', 'PR', 0, 4),
+  ('PURCHASE_ENQUIRY', '2026-27', 'PE', 0, 4)
+ON DUPLICATE KEY UPDATE
+  prefix = VALUES(prefix),
+  number_padding = VALUES(number_padding);
+
+-- ============================================================================
+-- Purchase module multi-tenant, PO, GRN, audit and outbox extensions
+-- Source: purchase-module-migration.sql
+-- ============================================================================
+
+-- Purchase module foundation migration
+-- MySQL 8.0+. This migration is additive and preserves existing purchase data.
+-- Run purchase-schema.sql first when installing a new database.
+
+SET @purchase_default_tenant := 'DEFAULT';
+
+-- Multi-tenant and item-level approval extensions for the existing PR tables.
+ALTER TABLE purchase_requests
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_request_id,
+  ADD COLUMN company_id VARCHAR(64) NULL AFTER tenant_id,
+  ADD COLUMN plant_id VARCHAR(64) NULL AFTER plant_code,
+  ADD COLUMN department_id VARCHAR(64) NULL AFTER floor_department,
+  ADD COLUMN cancellation_reason VARCHAR(1000) NULL AFTER remarks;
+
+UPDATE purchase_requests SET priority = 'HIGH' WHERE priority = 'EMERGENCY';
+UPDATE purchase_requests SET priority = 'MEDIUM' WHERE priority = 'NORMAL';
+ALTER TABLE purchase_requests
+  MODIFY COLUMN priority ENUM('LOW','MEDIUM','HIGH') NOT NULL DEFAULT 'MEDIUM';
+ALTER TABLE purchase_requests
+  MODIFY COLUMN pr_status ENUM('DRAFT','SUBMITTED','PENDING_APPROVAL','APPROVED','PARTIALLY_APPROVED','RETURNED','REJECTED','CANCELLED') NOT NULL DEFAULT 'DRAFT';
+
+ALTER TABLE purchase_request_items
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_request_item_id,
+  ADD COLUMN company_id VARCHAR(64) NULL AFTER tenant_id,
+  ADD COLUMN approved_quantity DECIMAL(18,3) NULL AFTER requested_quantity,
+  ADD COLUMN approval_status ENUM('PENDING','APPROVED','NOT_APPROVED','CLARIFICATION') NOT NULL DEFAULT 'PENDING' AFTER approved_quantity,
+  ADD COLUMN approval_reason VARCHAR(1000) NULL AFTER approval_status,
+  ADD COLUMN approved_by VARCHAR(50) NULL AFTER approval_reason,
+  ADD COLUMN approved_on DATETIME NULL AFTER approved_by;
+
+ALTER TABLE purchase_enquiries
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_enquiry_id,
+  ADD COLUMN company_id VARCHAR(64) NULL AFTER tenant_id,
+  ADD COLUMN subject VARCHAR(500) NULL AFTER quote_due_date,
+  ADD COLUMN delivery_required_by DATE NULL AFTER subject,
+  ADD COLUMN delivery_location VARCHAR(500) NULL AFTER delivery_required_by,
+  ADD COLUMN commercial_terms VARCHAR(2000) NULL AFTER delivery_location,
+  ADD COLUMN notes VARCHAR(2000) NULL AFTER commercial_terms;
+ALTER TABLE purchase_enquiry_requests
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_enquiry_request_id;
+ALTER TABLE purchase_enquiry_items
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_enquiry_item_id;
+ALTER TABLE purchase_enquiry_item_suppliers
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_enquiry_item_supplier_id;
+ALTER TABLE supplier_quotations
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER supplier_quotation_id,
+  ADD COLUMN packing_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER tax_amount,
+  ADD COLUMN freight_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER packing_amount,
+  ADD COLUMN other_charges_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER freight_amount;
+ALTER TABLE supplier_quotation_items
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER supplier_quotation_item_id,
+  ADD COLUMN discount_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER unit_price,
+  ADD COLUMN freight_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER tax_amount,
+  ADD COLUMN packing_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER freight_amount,
+  ADD COLUMN other_charges_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER packing_amount,
+  ADD COLUMN warranty_months INT UNSIGNED NULL AFTER previous_rating_snapshot;
+ALTER TABLE supplier_quotation_negotiation_history
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER supplier_quotation_negotiation_id;
+ALTER TABLE purchase_supplier_selections
+  ADD COLUMN tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT' AFTER purchase_supplier_selection_id;
+
+CREATE TABLE IF NOT EXISTS purchase_request_item_approval_history (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_request_id BIGINT UNSIGNED NOT NULL,
+  purchase_request_item_id BIGINT UNSIGNED NOT NULL,
+  decision ENUM('APPROVED','NOT_APPROVED','CLARIFICATION') NOT NULL,
+  approved_quantity DECIMAL(18,3) NULL,
+  reason VARCHAR(1000) NOT NULL,
+  from_status VARCHAR(40) NULL,
+  to_status VARCHAR(40) NOT NULL,
+  performed_by VARCHAR(50) NOT NULL,
+  performed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_pr_line_approval_request (tenant_id, purchase_request_id, performed_at),
+  CONSTRAINT fk_pr_line_approval_request FOREIGN KEY (purchase_request_id)
+    REFERENCES purchase_requests (purchase_request_id) ON DELETE CASCADE,
+  CONSTRAINT fk_pr_line_approval_item FOREIGN KEY (purchase_request_item_id)
+    REFERENCES purchase_request_items (purchase_request_item_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_request_supplier_assignments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_request_item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  assigned_quantity DECIMAL(18,3) NOT NULL,
+  assignment_status ENUM('ASSIGNED','CANCELLED') NOT NULL DEFAULT 'ASSIGNED',
+  assigned_by VARCHAR(50) NOT NULL,
+  assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_pr_item_supplier_assignment (tenant_id, purchase_request_item_id, supplier_id),
+  KEY ix_pr_supplier_assignment_supplier (tenant_id, supplier_id),
+  CONSTRAINT fk_pr_supplier_assignment_item FOREIGN KEY (purchase_request_item_id)
+    REFERENCES purchase_request_items (purchase_request_item_id) ON DELETE CASCADE,
+  CONSTRAINT fk_pr_supplier_assignment_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- PO header/items preserve snapshots so later master changes do not rewrite history.
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  purchase_order_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  company_id VARCHAR(64) NULL,
+  plant_id VARCHAR(64) NULL,
+  po_number VARCHAR(50) NOT NULL,
+  financial_year VARCHAR(10) NOT NULL,
+  po_date DATE NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  supplier_code_snapshot VARCHAR(50) NOT NULL,
+  supplier_name_snapshot VARCHAR(200) NOT NULL,
+  supplier_address_snapshot TEXT NULL,
+  supplier_gst_snapshot VARCHAR(30) NULL,
+  source_reference VARCHAR(500) NULL,
+  billing_address_snapshot TEXT NOT NULL,
+  delivery_address_snapshot TEXT NOT NULL,
+  payment_terms VARCHAR(500) NULL,
+  delivery_terms VARCHAR(500) NULL,
+  expected_delivery_date DATE NULL,
+  remarks VARCHAR(1000) NULL,
+  special_instructions VARCHAR(2000) NULL,
+  subtotal_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  discount_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  tax_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  freight_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  other_charges_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  grand_total_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  status ENUM('DRAFT','SUBMITTED','RETURNED','APPROVED','REJECTED','PARTIALLY_RECEIVED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'DRAFT',
+  version_number INT UNSIGNED NOT NULL DEFAULT 1,
+  submitted_by VARCHAR(50) NULL,
+  submitted_at DATETIME NULL,
+  approved_by VARCHAR(50) NULL,
+  approved_at DATETIME NULL,
+  decision_reason VARCHAR(1000) NULL,
+  cancellation_reason VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_order_id),
+  UNIQUE KEY uq_purchase_order_number (tenant_id, po_number),
+  KEY ix_purchase_order_queue (tenant_id, status, po_date),
+  KEY ix_purchase_order_supplier (tenant_id, supplier_id),
+  CONSTRAINT fk_purchase_order_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE purchase_orders
+  ADD COLUMN packing_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER tax_amount;
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  purchase_order_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_order_id BIGINT UNSIGNED NOT NULL,
+  purchase_request_item_id BIGINT UNSIGNED NULL,
+  line_number INT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  item_code_snapshot VARCHAR(100) NOT NULL,
+  item_type_snapshot VARCHAR(120) NOT NULL,
+  item_description_snapshot VARCHAR(250) NOT NULL,
+  item_specification_snapshot VARCHAR(1000) NULL,
+  uom_code_snapshot VARCHAR(30) NOT NULL,
+  hsn_code_snapshot VARCHAR(20) NULL,
+  ordered_quantity DECIMAL(18,3) NOT NULL,
+  received_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  unit_price DECIMAL(18,4) NOT NULL,
+  discount_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  tax_percent DECIMAL(7,4) NOT NULL DEFAULT 0.0000,
+  tax_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  freight_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  other_charges_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  line_total_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  required_date DATE NULL,
+  line_status ENUM('OPEN','PARTIALLY_RECEIVED','RECEIVED','CANCELLED') NOT NULL DEFAULT 'OPEN',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (purchase_order_item_id),
+  UNIQUE KEY uq_purchase_order_line (purchase_order_id, line_number),
+  KEY ix_purchase_order_item_source (tenant_id, purchase_request_item_id),
+  CONSTRAINT fk_purchase_order_item_header FOREIGN KEY (purchase_order_id)
+    REFERENCES purchase_orders (purchase_order_id) ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_order_item_request_line FOREIGN KEY (purchase_request_item_id)
+    REFERENCES purchase_request_items (purchase_request_item_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_purchase_order_item_master FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE purchase_order_items
+  ADD COLUMN packing_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER tax_amount;
+
+CREATE TABLE IF NOT EXISTS purchase_order_sources (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_order_id BIGINT UNSIGNED NOT NULL,
+  purchase_order_item_id BIGINT UNSIGNED NOT NULL,
+  purchase_request_id BIGINT UNSIGNED NULL,
+  purchase_request_item_id BIGINT UNSIGNED NULL,
+  source_quantity DECIMAL(18,3) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_purchase_order_source (tenant_id, purchase_order_id),
+  CONSTRAINT fk_purchase_order_source_header FOREIGN KEY (purchase_order_id)
+    REFERENCES purchase_orders (purchase_order_id) ON DELETE CASCADE,
+  CONSTRAINT fk_purchase_order_source_item FOREIGN KEY (purchase_order_item_id)
+    REFERENCES purchase_order_items (purchase_order_item_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_order_attachments (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_order_id BIGINT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_url VARCHAR(1000) NOT NULL,
+  mime_type VARCHAR(120) NULL,
+  file_size_bytes BIGINT UNSIGNED NULL,
+  uploaded_by VARCHAR(50) NOT NULL,
+  uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_purchase_order_attachment (tenant_id, purchase_order_id),
+  CONSTRAINT fk_purchase_order_attachment_header FOREIGN KEY (purchase_order_id)
+    REFERENCES purchase_orders (purchase_order_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS purchase_order_approval_history (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_order_id BIGINT UNSIGNED NOT NULL,
+  decision ENUM('SUBMITTED','APPROVED','RETURNED','REJECTED','CANCELLED') NOT NULL,
+  reason VARCHAR(1000) NULL,
+  from_status VARCHAR(40) NULL,
+  to_status VARCHAR(40) NOT NULL,
+  performed_by VARCHAR(50) NOT NULL,
+  performed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY ix_purchase_order_approval_history (tenant_id, purchase_order_id, performed_at),
+  CONSTRAINT fk_purchase_order_approval_header FOREIGN KEY (purchase_order_id)
+    REFERENCES purchase_orders (purchase_order_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- GRN supports multiple partial receipts against a single PO.
+CREATE TABLE IF NOT EXISTS goods_receipt_notes (
+  grn_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  company_id VARCHAR(64) NULL,
+  plant_id VARCHAR(64) NULL,
+  grn_number VARCHAR(50) NOT NULL,
+  grn_date DATE NOT NULL,
+  purchase_order_id BIGINT UNSIGNED NOT NULL,
+  gate_entry_number VARCHAR(50) NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  supplier_name_snapshot VARCHAR(200) NOT NULL,
+  inspection_status ENUM('NOT_REQUIRED','PENDING','PASSED','FAILED','PARTIAL') NOT NULL DEFAULT 'PENDING',
+  status ENUM('DRAFT','INWARD','INSPECTION_PENDING','ACCEPTED','PARTIALLY_ACCEPTED','REJECTED','POSTED','CANCELLED') NOT NULL DEFAULT 'DRAFT',
+  remarks VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (grn_id),
+  UNIQUE KEY uq_grn_number (tenant_id, grn_number),
+  KEY ix_grn_queue (tenant_id, status, grn_date),
+  CONSTRAINT fk_grn_purchase_order FOREIGN KEY (purchase_order_id)
+    REFERENCES purchase_orders (purchase_order_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_grn_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS goods_receipt_note_items (
+  grn_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  grn_id BIGINT UNSIGNED NOT NULL,
+  purchase_order_item_id BIGINT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  item_description_snapshot VARCHAR(250) NOT NULL,
+  uom_code_snapshot VARCHAR(30) NOT NULL,
+  ordered_quantity DECIMAL(18,3) NOT NULL,
+  previously_received_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  received_quantity DECIMAL(18,3) NOT NULL,
+  accepted_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  rejected_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  rejection_reason VARCHAR(1000) NULL,
+  replacement_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (grn_item_id),
+  UNIQUE KEY uq_grn_item_po_line (grn_id, purchase_order_item_id),
+  CONSTRAINT fk_grn_item_header FOREIGN KEY (grn_id)
+    REFERENCES goods_receipt_notes (grn_id) ON DELETE CASCADE,
+  CONSTRAINT fk_grn_item_po_line FOREIGN KEY (purchase_order_item_id)
+    REFERENCES purchase_order_items (purchase_order_item_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_grn_item_master FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  audit_log_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  module VARCHAR(80) NOT NULL,
+  entity_type VARCHAR(80) NOT NULL,
+  entity_id VARCHAR(80) NOT NULL,
+  action VARCHAR(80) NOT NULL,
+  old_value JSON NULL,
+  new_value JSON NULL,
+  performed_by VARCHAR(50) NOT NULL,
+  performed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ip_address VARCHAR(64) NULL,
+  remarks VARCHAR(1000) NULL,
+  PRIMARY KEY (audit_log_id),
+  KEY ix_audit_log_entity (tenant_id, module, entity_type, entity_id, performed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS approval_workflow (
+  approval_workflow_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  workflow_code VARCHAR(80) NOT NULL,
+  module VARCHAR(80) NOT NULL,
+  plant_id VARCHAR(64) NULL,
+  department_id VARCHAR(64) NULL,
+  material_category VARCHAR(120) NULL,
+  min_value DECIMAL(18,2) NULL,
+  max_value DECIMAL(18,2) NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (approval_workflow_id),
+  UNIQUE KEY uq_approval_workflow (tenant_id, workflow_code),
+  KEY ix_approval_workflow_match (tenant_id, module, plant_id, department_id, active_flag)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS approval_level (
+  approval_level_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  approval_workflow_id BIGINT UNSIGNED NOT NULL,
+  level_number INT UNSIGNED NOT NULL,
+  approver_role VARCHAR(80) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  PRIMARY KEY (approval_level_id),
+  UNIQUE KEY uq_approval_level (approval_workflow_id, level_number),
+  CONSTRAINT fk_approval_level_workflow FOREIGN KEY (approval_workflow_id)
+    REFERENCES approval_workflow (approval_workflow_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS approval_transaction (
+  approval_transaction_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  workflow_code VARCHAR(80) NOT NULL,
+  entity_type VARCHAR(80) NOT NULL,
+  entity_id BIGINT UNSIGNED NOT NULL,
+  current_level INT UNSIGNED NOT NULL DEFAULT 1,
+  status ENUM('PENDING','APPROVED','RETURNED','REJECTED') NOT NULL DEFAULT 'PENDING',
+  assigned_to VARCHAR(50) NULL,
+  decision_reason VARCHAR(1000) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (approval_transaction_id),
+  UNIQUE KEY uq_approval_transaction (tenant_id, entity_type, entity_id),
+  KEY ix_approval_transaction_queue (tenant_id, status, assigned_to)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Transactional outbox for RFQ emails, reminders and document generation.
+-- Workers can claim PENDING jobs without coupling external delivery to a DB transaction.
+CREATE TABLE IF NOT EXISTS purchase_outbox_job (
+  job_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  job_type VARCHAR(80) NOT NULL,
+  entity_type VARCHAR(80) NOT NULL,
+  entity_id BIGINT UNSIGNED NOT NULL,
+  payload JSON NOT NULL,
+  status ENUM('PENDING','PROCESSING','COMPLETED','FAILED') NOT NULL DEFAULT 'PENDING',
+  attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  locked_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  last_error VARCHAR(2000) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (job_id),
+  KEY ix_purchase_outbox_claim (status, available_at),
+  KEY ix_purchase_outbox_entity (tenant_id, entity_type, entity_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Supplier-specific RFQ email outbox. Each row is one email delivery attempt
+-- that can be viewed and retried independently of other suppliers.
+CREATE TABLE IF NOT EXISTS purchase_rfq_email_outbox (
+  email_outbox_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_enquiry_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  recipient_email VARCHAR(320) NOT NULL,
+  recipient_name VARCHAR(200) NULL,
+  subject VARCHAR(500) NOT NULL,
+  text_body TEXT NOT NULL,
+  html_body MEDIUMTEXT NOT NULL,
+  status ENUM('PENDING','PROCESSING','SENT','FAILED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+  attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  locked_at DATETIME NULL,
+  sent_at DATETIME NULL,
+  message_id VARCHAR(500) NULL,
+  last_error VARCHAR(2000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (email_outbox_id),
+  UNIQUE KEY uq_rfq_email_outbox_supplier (tenant_id, purchase_enquiry_id, supplier_id),
+  KEY ix_rfq_email_outbox_claim (status, available_at),
+  KEY ix_rfq_email_outbox_enquiry (tenant_id, purchase_enquiry_id),
+  CONSTRAINT fk_rfq_email_outbox_enquiry FOREIGN KEY (purchase_enquiry_id)
+    REFERENCES purchase_enquiries (purchase_enquiry_id) ON DELETE CASCADE,
+  CONSTRAINT fk_rfq_email_outbox_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- A supplier-specific stored RFQ PDF is produced before any email is delivered.
+CREATE TABLE IF NOT EXISTS purchase_rfq_documents (
+  rfq_document_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  purchase_enquiry_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_url VARCHAR(1000) NOT NULL,
+  file_size_bytes BIGINT UNSIGNED NULL,
+  generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  generated_by VARCHAR(100) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (rfq_document_id),
+  UNIQUE KEY uq_rfq_document_supplier (tenant_id, purchase_enquiry_id, supplier_id),
+  KEY ix_rfq_document_enquiry (tenant_id, purchase_enquiry_id),
+  CONSTRAINT fk_rfq_document_enquiry FOREIGN KEY (purchase_enquiry_id)
+    REFERENCES purchase_enquiries (purchase_enquiry_id) ON DELETE CASCADE,
+  CONSTRAINT fk_rfq_document_supplier FOREIGN KEY (supplier_id)
+    REFERENCES customer_master (customer_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Normalize previously queued, unsent RFQ email subjects. Item names remain in
+-- the email body and in the stored RFQ PDF, not in the email subject.
+UPDATE purchase_rfq_email_outbox O
+JOIN purchase_enquiries PE ON PE.purchase_enquiry_id=O.purchase_enquiry_id
+SET O.subject=CONCAT('Request for Quotation - ', PE.enquiry_number)
+WHERE O.status='PENDING';
+
+-- Document sequences used by purchase services.
+INSERT INTO app_document_sequences (sequence_key, financial_year, prefix, current_number, number_padding)
+VALUES
+  ('PURCHASE_REQUEST', '2026-27', 'PR', 0, 4),
+  ('PURCHASE_ENQUIRY', '2026-27', 'PE', 0, 4),
+  ('PURCHASE_ORDER', '2026-27', 'PO', 0, 4),
+  ('GRN', '2026-27', 'GRN', 0, 4)
+ON DUPLICATE KEY UPDATE prefix = VALUES(prefix), number_padding = VALUES(number_padding);
+
+-- ============================================================================
+-- Installation complete
+-- ============================================================================
+SELECT 'A TECH Automation production database created successfully.' AS result;
+
+-- ============================================================================
+-- A TECH AUTOMATION ERP - PURCHASE MODULE DEMO TRANSACTION DATA
+-- Repeatable demo rows. Run after the schema and master sample data above.
+-- Demo scope: PR -> approval -> RFQ -> supplier quotations -> selection -> outbox.
+-- ============================================================================
+
+USE `atech_erp`;
+SET FOREIGN_KEY_CHECKS = 0;
+START TRANSACTION;
+
+-- Remove only this demo transaction, if it was imported earlier.
+DELETE FROM purchase_enquiries WHERE enquiry_number = 'PE-DEMO-0001';
+DELETE FROM purchase_requests WHERE pr_number = 'PR-DEMO-0001';
+
+-- A second supplier lets the quote-comparison screen show multiple supplier columns.
+INSERT INTO customer_master
+  (party_type, customer_code, customer_name, customer_short_name, plant_code,
+   billing_address, city, state_name, country_name, mobile_number, email_address,
+   currency_code, customer_status, active_flag, created_by)
+VALUES
+  ('SUPPLIER', 'SUP-DEMO-0002', 'Demo Precision Components', 'DEMO PRECISION', 'CHN-S02',
+   '18 Ambattur Industrial Estate, Chennai - 600058', 'Chennai', 'Tamil Nadu',
+   'India', '9000000003', 'sales.precision.demo@example.com', 'INR', 'ACTIVE', 'Y', 'SYSTEM')
+ON DUPLICATE KEY UPDATE
+  customer_name=VALUES(customer_name), email_address=VALUES(email_address),
+  active_flag='Y', updated_by='SYSTEM';
+
+SET @demo_item_id = (SELECT item_id FROM item_master WHERE item_code='RM-DEMO-0001' LIMIT 1);
+SET @demo_supplier_1 = (SELECT customer_id FROM customer_master WHERE customer_code='SUP-DEMO-0001' LIMIT 1);
+SET @demo_supplier_2 = (SELECT customer_id FROM customer_master WHERE customer_code='SUP-DEMO-0002' LIMIT 1);
+
+-- Approved purchase request (one approved line).
+INSERT INTO purchase_requests
+  (pr_number, tenant_id, company_id, financial_year, plant_code, plant_id,
+   floor_department, department_id, requested_by, request_date, required_date,
+   requisition_type, priority, remarks, estimated_subtotal, estimated_tax_amount,
+   estimated_total_amount, pr_status, submitted_on, approved_by, approved_on,
+   created_by)
+VALUES
+  ('PR-DEMO-0001', 'DEFAULT', 'DEMO-COMPANY', '2026-27', 'CHN-01', 'CHN-01',
+   'Production - Assembly', 'PRODUCTION', 'System Administrator', CURRENT_DATE,
+   DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY), 'NEW_ITEM', 'MEDIUM',
+   'Demo PR for quote comparison and PO readiness testing', 1200.00, 216.00,
+   1416.00, 'APPROVED', CURRENT_TIMESTAMP, 'System Administrator', CURRENT_TIMESTAMP,
+   'SYSTEM')
+ON DUPLICATE KEY UPDATE
+  pr_status='APPROVED', required_date=VALUES(required_date),
+  approved_by='System Administrator', approved_on=CURRENT_TIMESTAMP,
+  updated_by='SYSTEM';
+SET @demo_pr_id = (SELECT purchase_request_id FROM purchase_requests WHERE pr_number='PR-DEMO-0001');
+
+INSERT INTO purchase_request_items
+  (purchase_request_id, tenant_id, company_id, line_number, item_id,
+   item_group_name, item_type_name, item_description, item_specification,
+   requested_quantity, approved_quantity, uom_code, estimated_rate_per_qty,
+   tax_percent, estimated_tax_amount, estimated_total_amount, purpose,
+   approval_status, approved_by, approved_on, created_by)
+VALUES
+  (@demo_pr_id, 'DEFAULT', 'DEMO-COMPANY', 1, @demo_item_id,
+   'Raw Material', 'Rod', 'EN8 round rod for demo drive shaft', 'Diameter 50 mm',
+   10.000, 10.000, 'NOS', 120.00, 18.0000, 216.00, 1416.00,
+   'Demo purchase flow validation', 'APPROVED', 'System Administrator', CURRENT_TIMESTAMP, 'SYSTEM')
+ON DUPLICATE KEY UPDATE
+  approved_quantity=10.000, approval_status='APPROVED', updated_by='SYSTEM';
+SET @demo_pr_item_id = (SELECT purchase_request_item_id FROM purchase_request_items WHERE purchase_request_id=@demo_pr_id AND line_number=1);
+
+-- RFQ/enquiry created from the approved PR.
+INSERT INTO purchase_enquiries
+  (enquiry_number, tenant_id, company_id, financial_year, enquiry_date,
+   quote_due_date, subject, delivery_required_by, delivery_location,
+   commercial_terms, notes, enquiry_status, remarks, created_by)
+VALUES
+  ('PE-DEMO-0001', 'DEFAULT', 'DEMO-COMPANY', '2026-27', CURRENT_DATE,
+   DATE_ADD(CURRENT_DATE, INTERVAL 14 DAY), 'Request for Quotation - PE-DEMO-0001',
+   DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY), 'Atech Automation - Chennai',
+   'Prices in INR; taxes and delivery to be stated separately.',
+   'Demo RFQ generated from PR-DEMO-0001', 'SENT', 'Demo RFQ for testing', 'SYSTEM')
+ON DUPLICATE KEY UPDATE enquiry_status='SENT', updated_by='SYSTEM';
+SET @demo_enquiry_id = (SELECT purchase_enquiry_id FROM purchase_enquiries WHERE enquiry_number='PE-DEMO-0001');
+
+INSERT INTO purchase_enquiry_requests (purchase_enquiry_id, tenant_id, purchase_request_id, created_by)
+VALUES (@demo_enquiry_id, 'DEFAULT', @demo_pr_id, 'SYSTEM');
+SET @demo_enquiry_item_id = NULL;
+INSERT INTO purchase_enquiry_items
+  (purchase_enquiry_id, tenant_id, purchase_request_item_id, line_number,
+   enquiry_quantity, uom_code, enquiry_required, line_status, created_by)
+VALUES (@demo_enquiry_id, 'DEFAULT', @demo_pr_item_id, 1, 10.000, 'NOS', 'Y', 'SENT', 'SYSTEM');
+SET @demo_enquiry_item_id = (SELECT purchase_enquiry_item_id FROM purchase_enquiry_items WHERE purchase_enquiry_id=@demo_enquiry_id AND line_number=1);
+
+INSERT INTO purchase_enquiry_item_suppliers
+  (purchase_enquiry_item_id, tenant_id, supplier_id, assignment_status,
+   assigned_by, assigned_on, sent_on, supplier_email)
+VALUES
+  (@demo_enquiry_item_id, 'DEFAULT', @demo_supplier_1, 'SENT', 'SYSTEM', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'sales.demo@example.com'),
+  (@demo_enquiry_item_id, 'DEFAULT', @demo_supplier_2, 'SENT', 'SYSTEM', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'sales.precision.demo@example.com');
+
+-- Two supplier quotations for comparison.
+INSERT INTO supplier_quotations
+  (purchase_enquiry_id, tenant_id, supplier_id, supplier_quotation_number,
+   supplier_quotation_date, quotation_status, currency_code, payment_terms,
+   delivery_terms, quotation_valid_until, subtotal_amount, tax_amount,
+   grand_total_amount, attachment_file_name, attachment_file_url, entered_by)
+VALUES
+  (@demo_enquiry_id, 'DEFAULT', @demo_supplier_1, 'QTN-DEMO-0001', CURRENT_DATE, 'RECEIVED', 'INR',
+   '30 days from invoice', '7 days', DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY), 1200.00, 216.00, 1416.00,
+   'QTN-DEMO-0001.pdf', '/uploads/quotations/QTN-DEMO-0001.pdf', 'SYSTEM'),
+  (@demo_enquiry_id, 'DEFAULT', @demo_supplier_2, 'QTN-DEMO-0002', CURRENT_DATE, 'RECEIVED', 'INR',
+   '45 days from invoice', '10 days', DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY), 1150.00, 207.00, 1357.00,
+   'QTN-DEMO-0002.pdf', '/uploads/quotations/QTN-DEMO-0002.pdf', 'SYSTEM');
+SET @demo_quote_1 = (SELECT supplier_quotation_id FROM supplier_quotations WHERE supplier_quotation_number='QTN-DEMO-0001');
+SET @demo_quote_2 = (SELECT supplier_quotation_id FROM supplier_quotations WHERE supplier_quotation_number='QTN-DEMO-0002');
+
+INSERT INTO supplier_quotation_items
+  (supplier_quotation_id, tenant_id, purchase_enquiry_item_id, quote_response,
+   quoted_quantity, unit_price, tax_percent, tax_amount, total_amount,
+   delivery_date, delivery_lead_days, recommended_flag, comparison_score)
+VALUES
+  (@demo_quote_1, 'DEFAULT', @demo_enquiry_item_id, 'QUOTED', 10.000, 120.00, 18.0000, 216.00, 1416.00,
+   DATE_ADD(CURRENT_DATE, INTERVAL 7 DAY), 7, 'N', 82.0000),
+  (@demo_quote_2, 'DEFAULT', @demo_enquiry_item_id, 'QUOTED', 10.000, 115.00, 18.0000, 207.00, 1357.00,
+   DATE_ADD(CURRENT_DATE, INTERVAL 10 DAY), 10, 'Y', 91.0000);
+SET @demo_quote_item_2 = (SELECT supplier_quotation_item_id FROM supplier_quotation_items WHERE supplier_quotation_id=@demo_quote_2 AND purchase_enquiry_item_id=@demo_enquiry_item_id);
+
+-- Supplier selection: the lower quote is selected and is PO-eligible.
+INSERT INTO purchase_supplier_selections
+  (tenant_id, purchase_enquiry_item_id, supplier_quotation_item_id, supplier_id,
+   selected_quantity, selection_reason, manager_decision, selected_by)
+VALUES
+  ('DEFAULT', @demo_enquiry_item_id, @demo_quote_item_2, @demo_supplier_2, 10.000,
+   'Best evaluated quote for demo', 'SELECTED', 'System Administrator')
+ON DUPLICATE KEY UPDATE
+  selected_quantity=VALUES(selected_quantity), manager_decision='SELECTED', updated_by='SYSTEM';
+
+-- Supplier-specific RFQ PDF metadata and internal email outbox rows.
+INSERT INTO purchase_rfq_documents
+  (tenant_id, purchase_enquiry_id, supplier_id, file_name, file_url, file_size_bytes, generated_by)
+VALUES
+  ('DEFAULT', @demo_enquiry_id, @demo_supplier_1, 'PE-DEMO-0001-SUP-DEMO-0001.pdf', '/uploads/rfq/PE-DEMO-0001-SUP-DEMO-0001.pdf', 0, 'SYSTEM'),
+  ('DEFAULT', @demo_enquiry_id, @demo_supplier_2, 'PE-DEMO-0001-SUP-DEMO-0002.pdf', '/uploads/rfq/PE-DEMO-0001-SUP-DEMO-0002.pdf', 0, 'SYSTEM');
+
+INSERT INTO purchase_rfq_email_outbox
+  (tenant_id, purchase_enquiry_id, supplier_id, recipient_email, recipient_name,
+   subject, text_body, html_body, status, created_by)
+VALUES
+  ('DEFAULT', @demo_enquiry_id, @demo_supplier_1, 'sales.demo@example.com', 'Demo Metals Supplier',
+   'Request for Quotation - PE-DEMO-0001', 'Please review the attached RFQ.', '<p>Please review the attached RFQ.</p>', 'PENDING', 'SYSTEM'),
+  ('DEFAULT', @demo_enquiry_id, @demo_supplier_2, 'sales.precision.demo@example.com', 'Demo Precision Components',
+   'Request for Quotation - PE-DEMO-0001', 'Please review the attached RFQ.', '<p>Please review the attached RFQ.</p>', 'PENDING', 'SYSTEM');
+
+COMMIT;
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- Verification queries for the imported demo.
+SELECT 'Demo import complete' AS result,
+       @demo_pr_id AS purchase_request_id,
+       @demo_enquiry_id AS purchase_enquiry_id,
+       @demo_enquiry_item_id AS purchase_enquiry_item_id;
+SELECT pr_number, pr_status, required_date FROM purchase_requests WHERE pr_number='PR-DEMO-0001';
+SELECT enquiry_number, enquiry_status FROM purchase_enquiries WHERE enquiry_number='PE-DEMO-0001';
+SELECT supplier_id, supplier_quotation_number, grand_total_amount FROM supplier_quotations WHERE purchase_enquiry_id=@demo_enquiry_id;
+SELECT supplier_id, status, recipient_email, subject FROM purchase_rfq_email_outbox WHERE purchase_enquiry_id=@demo_enquiry_id;
+
+-- ============================================================================
+-- End of portable demo install
+-- ============================================================================

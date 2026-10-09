@@ -1,0 +1,24 @@
+.part-master-table {
+  min-width: 1120px;
+}
+
+.part-master-table td:nth-child(1) strong {
+  color: #354092;
+}
+
+.part-category-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  padding: 5px 9px;
+  border-radius: 20px;
+  background: #eef0ff;
+  color: #354092;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.part-weight-cell {
+  white-space: nowrap;
+}

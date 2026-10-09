@@ -1,0 +1,26 @@
+import { CircleX, PackagePlus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { apiMessage } from "../../../api/client";
+import { purchaseApi } from "../../../api/purchase.api";
+import { useAppFeedback } from "../../../components/AppFeedback";
+import Pagination, { PAGE_SIZE } from "../../../components/Pagination";
+import GrnDashboard from "./components/GrnDashboard";
+import GrnFilters from "./components/GrnFilters";
+import GrnTable from "./components/GrnTable";
+import PurchaseModuleTabs from "./components/PurchaseModuleTabs";
+import type { GrnListFilter, GrnRecord } from "./grnData";
+import { mapGrn } from "./purchaseReceiptMappers";
+import "./PurchaseFlow.css";
+
+const routeForRecord = (record: GrnRecord) => record.status === "DRAFT" ? `/purchase/grn/${record.id}/inward` : record.status === "OUTSOURCING_WIP" ? "/inventory/outsourcing-wip" : ["INSPECTION_PENDING", "INSPECTION_HOLD", "REJECTED"].includes(record.status) ? `/purchase/grn/${record.id}/inspection` : `/purchase/grn/${record.id}/stock-receipt`;
+export default function GrnListPage() {
+  const navigate = useNavigate(); const { showSuccess } = useAppFeedback(); const [records, setRecords] = useState<GrnRecord[]>([]); const [summary, setSummary] = useState({ total: 0, inspectionPending: 0, readyForStock: 0, stockPosted: 0, rejectedInspection: 0 }); const [search, setSearch] = useState(""); const [status, setStatus] = useState<GrnListFilter>("ALL"); const [receiptType, setReceiptType] = useState("ALL"); const [supplier, setSupplier] = useState("ALL"); const [page, setPage] = useState(1); const [total, setTotal] = useState(0); const [error, setError] = useState(""); const [suppliers, setSuppliers] = useState<string[]>([]);
+  const rejectedInspectionList = status === "REJECTED_INSPECTION";
+  const load = async (notify = false) => { try { setError(""); const [response, summaryResponse] = await Promise.all([purchaseApi.listGrns({ page, pageSize: PAGE_SIZE, search, status: status === "ALL" || rejectedInspectionList ? "" : status, receiptType: receiptType === "ALL" ? "" : receiptType, supplier: supplier === "ALL" ? "" : supplier, rejectedInspection: rejectedInspectionList ? "true" : "" }), purchaseApi.grnSummary()]); setRecords((response?.data || []).map(mapGrn)); setTotal(Number(response?.meta?.total || 0)); setSummary(summaryResponse?.data || {}); if (notify) showSuccess("GRN list refreshed."); } catch (reason) { setError(apiMessage(reason)); } };
+  useEffect(() => { void load(); }, [page, search, status, receiptType, supplier]);
+  useEffect(() => { void purchaseApi.listGrnSuppliers().then((response) => setSuppliers(Array.isArray(response?.data) ? response.data.filter(Boolean) : [])).catch((reason) => setError(apiMessage(reason))); }, []);
+  const filtered = records;
+  const openRejectedStock = (record?: GrnRecord) => navigate(`/inventory/rejection-inventory${record ? `?grn=${encodeURIComponent(record.grnNumber)}` : ""}`);
+  return <div className="purchase-page"><header className="purchase-page-header"><div className="purchase-title-group"><span className="purchase-page-module-icon"><PackagePlus size={19} /></span><div><p>Purchase / Material Receipt</p><h1>GRN &amp; Receipt</h1><span>Receive, inspect and post accepted materials into inventory</span></div></div></header><PurchaseModuleTabs /><div className="purchase-grn-page"><GrnDashboard summary={summary} status={status} onStatusChange={(value) => { setStatus(value); setPage(1); }} /><section className="purchase-grn-list"><header><div><h2>{rejectedInspectionList ? "Rejected Inspection GRNs" : "Goods Receipt Notes"}</h2><p>{rejectedInspectionList ? "Review rejected quantities and open the matching Rejection Inventory record." : "Track inward receipt, inspection and inventory posting."}</p></div><div className="purchase-section-actions"><span>{total} {rejectedInspectionList ? "rejected GRNs" : "records"}</span>{rejectedInspectionList && <button type="button" className="purchase-grn-rejection-inventory-button" onClick={() => openRejectedStock()}><CircleX size={15}/> Rejection Inventory</button>}<button type="button" className="purchase-primary-button" onClick={()=>navigate("/purchase/grn/new")}><PackagePlus size={16}/> New GRN</button></div></header>{error && <p className="purchase-grn-error">{error}</p>}<GrnFilters receiptType={receiptType} onReceiptTypeChange={(value) => { setReceiptType(value); setPage(1); }} suppliers={suppliers} search={search} status={status} supplier={supplier} onSearchChange={(value) => { setSearch(value); setPage(1); }} onStatusChange={(value) => { setStatus(value); setPage(1); }} onSupplierChange={(value) => { setSupplier(value); setPage(1); }} onRefresh={() => { void load(true); }}  pagination={<Pagination page={page} total={total} onPageChange={setPage} itemLabel="GRNs" />} />{rejectedInspectionList && <div className="purchase-grn-rejected-list-note"><CircleX size={15}/><span>Rejected material is segregated from available stock. Open a GRN to view its rejected stock and follow-up action.</span></div>}<GrnTable records={filtered} onAction={(record) => navigate(routeForRecord(record))} showRejectedInspection={rejectedInspectionList} onViewRejectedStock={openRejectedStock} /></section></div></div>;
+}

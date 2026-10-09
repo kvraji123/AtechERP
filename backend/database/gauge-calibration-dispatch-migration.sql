@@ -1,0 +1,38 @@
+-- External calibration dispatch batches.
+-- Each header is the dispatch challan, while individual Gauge IDs remain linked through gauge_history.
+
+ALTER TABLE gauge_movement_batches
+  MODIFY COLUMN movement_type ENUM('ISSUE','RETURN','CALIBRATION_DISPATCH') NOT NULL;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN calibration_agency VARCHAR(180) NULL AFTER issued_to;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN service_purchase_order_id BIGINT UNSIGNED NULL AFTER calibration_agency;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN service_po_number_snapshot VARCHAR(50) NULL AFTER service_purchase_order_id;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN challan_number VARCHAR(80) NULL AFTER service_po_number_snapshot;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN expected_return_date DATE NULL AFTER challan_number;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN courier_reference VARCHAR(180) NULL AFTER expected_return_date;
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN dispatch_status ENUM('DISPATCHED','RETURNED','CANCELLED') NOT NULL DEFAULT 'DISPATCHED' AFTER courier_reference;
+
+ALTER TABLE gauge_movement_batches
+  ADD KEY ix_gauge_calibration_dispatch_list (tenant_id,movement_type,movement_date);
+
+ALTER TABLE gauge_movement_batches
+  ADD KEY ix_gauge_calibration_dispatch_po (tenant_id,service_purchase_order_id);
+
+ALTER TABLE gauge_movement_batches
+  ADD CONSTRAINT fk_gauge_calibration_dispatch_po
+    FOREIGN KEY (service_purchase_order_id)
+    REFERENCES purchase_orders(purchase_order_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT;

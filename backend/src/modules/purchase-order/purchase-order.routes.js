@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { asyncHandler } from "../../utils/asyncHandler.js";
+import { requirePermission } from "../../shared/middleware/requirePermission.js";
+import * as controller from "./purchase-order.controller.js";
+const router = Router();
+router.get("/suppliers", requirePermission("PO_CREATE", "PO_APPROVE"), asyncHandler(controller.listSupplierOptions));
+router.get("/", requirePermission("PO_CREATE", "PO_APPROVE"), asyncHandler(controller.list));
+router.get("/summary", requirePermission("PO_CREATE", "PO_APPROVE"), asyncHandler(controller.summary));
+router.get("/:id", requirePermission("PO_CREATE", "PO_APPROVE"), asyncHandler(controller.get));
+router.post("/generate", requirePermission("PO_CREATE"), asyncHandler(controller.generate));
+router.put("/:id", requirePermission("PO_CREATE"), asyncHandler(controller.update));
+router.post("/:id/submit", requirePermission("PO_CREATE"), asyncHandler(controller.submit));
+export default router;

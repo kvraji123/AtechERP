@@ -1,0 +1,6 @@
+.machine-filter-grid { display:grid; grid-template-columns:minmax(320px,1fr) 180px; gap:12px; padding:18px 20px; }
+.machine-master-table { min-width:1500px; }
+.machine-capacity-cell { max-width:260px; white-space:normal; line-height:1.45; }
+.machine-count-badge { min-width:34px; display:inline-flex; justify-content:center; padding:5px 10px; border-radius:999px; color:#273689; background:#edf0ff; font-weight:800; }
+@media (max-width:720px) { .machine-filter-grid { grid-template-columns:1fr; } }
+

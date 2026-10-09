@@ -1,0 +1,118 @@
+.marketing-stage-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #f7f9ff;
+  border: 1px solid #d9e0ee;
+  border-radius: 0;
+}
+
+.marketing-stage-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: none;
+  border-right: 1px solid #d9e0ee;
+  background: #f5f8ff;
+  color: #65738a;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.marketing-stage-tab:last-child {
+  border-right: none;
+}
+
+.marketing-stage-tab:hover:not(:disabled):not(.active) {
+  background: #eaf0ff;
+  color: #35449b;
+}
+
+.marketing-stage-tab.active {
+  background: linear-gradient(
+    135deg,
+    #35449b 0%,
+    #4254b2 100%
+  );
+  color: #ffffff;
+}
+
+.marketing-stage-tab.completed {
+  background: #eef3ff;
+  color: #65738a;
+}
+
+.marketing-stage-tab.completed:hover:not(:disabled) {
+  background: #e5edff;
+  color: #35449b;
+}
+
+.marketing-stage-tab.active.completed {
+  background: linear-gradient(
+    135deg,
+    #35449b 0%,
+    #4254b2 100%
+  );
+  color: #ffffff;
+}
+
+.marketing-stage-check {
+  flex: 0 0 auto;
+  color: #b8322a;
+}
+
+.marketing-stage-tab.active .marketing-stage-check {
+  color: #ffffff;
+}
+
+.marketing-stage-tab:disabled {
+  background: #f5f8ff;
+  color: #aeb8c8;
+  cursor: not-allowed;
+}
+
+.marketing-stage-tab:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 3px solid rgba(53, 68, 155, 0.2);
+  outline-offset: -3px;
+}
+
+@media (max-width: 760px) {
+  .marketing-stage-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .marketing-stage-tab:nth-child(2) {
+    border-right: none;
+  }
+
+  .marketing-stage-tab:nth-child(-n + 2) {
+    border-bottom: 1px solid #d9e0ee;
+  }
+}
+
+@media (max-width: 460px) {
+  .marketing-stage-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .marketing-stage-tab {
+    border-right: none;
+    border-bottom: 1px solid #d9e0ee;
+  }
+
+  .marketing-stage-tab:last-child {
+    border-bottom: none;
+  }
+}

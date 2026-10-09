@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { asyncHandler } from "../../utils/asyncHandler.js";
+import { requirePermission } from "../../shared/middleware/requirePermission.js";
+import * as controller from "./gate-entry.controller.js";
+const router = Router();
+router.get("/eligible-orders", requirePermission("GRN_POST"), asyncHandler(controller.eligibleOrders));
+router.get("/suppliers", requirePermission("GRN_POST"), asyncHandler(controller.listSupplierOptions));
+router.get("/", requirePermission("GRN_POST"), asyncHandler(controller.list));
+router.get("/summary", requirePermission("GRN_POST"), asyncHandler(controller.summary));
+router.get("/:id", requirePermission("GRN_POST"), asyncHandler(controller.get));
+router.post("/", requirePermission("GRN_POST"), asyncHandler(controller.create));
+router.put("/:id", requirePermission("GRN_POST"), asyncHandler(controller.update));
+export default router;

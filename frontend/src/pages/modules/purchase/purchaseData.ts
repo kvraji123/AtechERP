@@ -1,0 +1,178 @@
+import type { PurchaseApprovalRequest, PurchaseEnquiryLine, PurchaseRequestLine, SupplierOption } from "./types";
+
+export const departmentOptions = [
+  "Production — Assembly",
+  "Production — Machine Shop",
+  "Maintenance",
+  "Quality",
+  "Stores",
+];
+
+export const supplierOptions: SupplierOption[] = [
+  { id: "SUP-001", code: "SUP-001", name: "Nova Industrial Supply", rating: 4.8, leadTime: "5–7 days" },
+  { id: "SUP-002", code: "SUP-002", name: "Prime Motion Systems", rating: 4.6, leadTime: "7–9 days" },
+  { id: "SUP-003", code: "SUP-003", name: "Axis Automation", rating: 4.5, leadTime: "4–6 days" },
+  { id: "SUP-004", code: "SUP-004", name: "MechPro Components", rating: 4.3, leadTime: "8–10 days" },
+];
+
+export const itemMasterOptions = [
+  { group: "Capital Assets", type: "Machines & Equipment", code: "ITM-CA-001", description: "Plant machinery or production equipment", specification: "Capacity, make and model as per approved capital purchase specification", uom: "Nos", hsn: "84798999", tax: "18" },
+  { group: "Capital Assets", type: "Machine Accessories", code: "ITM-CA-002", description: "Accessory for machine or equipment", specification: "Compatible machine model and accessory rating as per Item Master", uom: "Nos", hsn: "84669390", tax: "18" },
+  { group: "Capital Assets", type: "IT Hardware", code: "ITM-CA-003", description: "Computer and networking hardware", specification: "Approved processor, memory, storage and warranty configuration", uom: "Nos", hsn: "84713010", tax: "18" },
+  { group: "Capital Assets", type: "Software", code: "ITM-CA-004", description: "Software licence or subscription", specification: "Approved edition, user count and licence validity", uom: "Lic", hsn: "997331", tax: "18" },
+  { group: "Consumables", type: "Fasteners", code: "ITM-CO-001", description: "Standard fasteners and fixing hardware", specification: "Size, material grade, thread and finish as per Item Master", uom: "Nos", hsn: "73181500", tax: "18" },
+  { group: "Consumables", type: "Purchased Items", code: "ITM-CO-002", description: "General purchased production item", specification: "Approved make, model and technical parameters from Item Master", uom: "Nos", hsn: "", tax: "18" },
+  { group: "Consumables", type: "Electrical Consumables", code: "ITM-CO-003", description: "Electrical consumable material", specification: "Voltage, current rating and approved make as per Item Master", uom: "Nos", hsn: "85469090", tax: "18" },
+  { group: "Consumables", type: "Lubricants", code: "ITM-CO-004", description: "Industrial lubricant or grease", specification: "Approved grade, viscosity and pack size", uom: "Ltr", hsn: "27101980", tax: "18" },
+  { group: "Raw Material", type: "Rod", code: "ITM-RM-001", description: "Raw material rod", specification: "Material grade, diameter and length as per Item Master", uom: "Kg", hsn: "72149990", tax: "18" },
+  { group: "Raw Material", type: "Plate", code: "ITM-RM-002", description: "Raw material plate", specification: "Material grade, thickness, width and length as per Item Master", uom: "Kg", hsn: "72085110", tax: "18" },
+  { group: "Raw Material", type: "Sheet", code: "ITM-RM-003", description: "Raw material sheet", specification: "Material grade, gauge and sheet dimensions as per Item Master", uom: "Kg", hsn: "72091790", tax: "18" },
+  { group: "Raw Material", type: "Tube", code: "ITM-RM-004", description: "Raw material tube", specification: "Material grade, OD, wall thickness and length as per Item Master", uom: "Mtr", hsn: "73063090", tax: "18" },
+  { group: "Tools & Fixtures", type: "Inserts", code: "ITM-TF-001", description: "Cutting tool insert", specification: "Insert geometry, grade and coating as per Item Master", uom: "Nos", hsn: "82090090", tax: "18" },
+  { group: "Tools & Fixtures", type: "Drill", code: "ITM-TF-002", description: "Industrial drill tool", specification: "Diameter, flute length, material and coating as per Item Master", uom: "Nos", hsn: "82075000", tax: "18" },
+  { group: "Tools & Fixtures", type: "Tap", code: "ITM-TF-003", description: "Thread cutting tap", specification: "Thread size, pitch, tolerance and tool material as per Item Master", uom: "Nos", hsn: "82074090", tax: "18" },
+];
+
+export const createBlankRequestLine = (id: number): PurchaseRequestLine => ({
+  id,
+  itemGroup: "",
+  itemType: "",
+  itemDescription: "",
+  specification: "",
+  quantity: "",
+  uom: "Nos",
+  ratePerQty: "",
+  taxPercent: "",
+  hsnCode: "",
+  purpose: "",
+  attachment: "",
+});
+
+const legacyInitialEnquiryLines: PurchaseEnquiryLine[] = [
+  {
+    id: 1,
+    prNumber: "PR/0048/26-27",
+    itemCode: "ITM-EL-001",
+    itemName: "Servo Motor",
+    itemDescription: "1.5 kW, 3000 RPM with encoder",
+    quantity: 10,
+    uom: "Nos",
+    requisitionType: "New Item",
+    enquiryRequired: true,
+    selected: true,
+    selectedSupplierIds: ["SUP-001", "SUP-002", "SUP-003"],
+    enquiryStatus: "Ready",
+    quotes: [
+      { supplierId: "SUP-001", supplierName: "Nova Industrial Supply", price: 128500, attachmentName: "nova-quote.pdf" },
+      { supplierId: "SUP-002", supplierName: "Prime Motion Systems", price: 126800, attachmentName: "prime-quote.pdf" },
+      { supplierId: "SUP-003", supplierName: "Axis Automation", price: 131200 },
+    ],
+  },
+  {
+    id: 2,
+    prNumber: "PR/0048/26-27",
+    itemCode: "ITM-ME-014",
+    itemName: "Linear Guide",
+    itemDescription: "HGR25CA, 1000 mm rail",
+    quantity: 20,
+    uom: "Nos",
+    requisitionType: "New Item",
+    enquiryRequired: true,
+    selected: true,
+    selectedSupplierIds: ["SUP-001", "SUP-004"],
+    enquiryStatus: "Ready",
+    quotes: [
+      { supplierId: "SUP-001", supplierName: "Nova Industrial Supply", price: 86400, attachmentName: "nova-quote.pdf" },
+      { supplierId: "SUP-004", supplierName: "MechPro Components", price: 83200, attachmentName: "mechpro-quote.pdf" },
+    ],
+  },
+  {
+    id: 3,
+    prNumber: "PR/0051/26-27",
+    itemCode: "ITM-ME-041",
+    itemName: "Bearing Set",
+    itemDescription: "6205 ZZ approved brand",
+    quantity: 50,
+    uom: "Set",
+    requisitionType: "Existing Item",
+    enquiryRequired: false,
+    selected: false,
+    selectedSupplierIds: [],
+    enquiryStatus: "Not Required",
+    quotes: [],
+  },
+  {
+    id: 4,
+    prNumber: "PR/0054/26-27",
+    itemCode: "ITM-TF-015",
+    itemName: "Cutting Inserts",
+    itemDescription: "CNMG carbide inserts, approved grade",
+    quantity: 100,
+    uom: "Nos",
+    requisitionType: "New Item",
+    enquiryRequired: true,
+    selected: true,
+    selectedSupplierIds: ["SUP-001", "SUP-004"],
+    enquiryStatus: "Ready",
+    quotes: [],
+  },
+  {
+    id: 5,
+    prNumber: "PR/0054/26-27",
+    itemCode: "ITM-TF-022",
+    itemName: "Drill Chuck",
+    itemDescription: "Heavy-duty keyed drill chuck, 1–16 mm",
+    quantity: 4,
+    uom: "Nos",
+    requisitionType: "New Item",
+    enquiryRequired: true,
+    selected: true,
+    selectedSupplierIds: ["SUP-003", "SUP-004"],
+    enquiryStatus: "Ready",
+    quotes: [],
+  },
+  {
+    id: 6,
+    prNumber: "PR/0057/26-27",
+    itemCode: "ITM-PN-011",
+    itemName: "Pneumatic Cylinder",
+    itemDescription: "Double acting cylinder, 50 mm bore × 200 mm stroke",
+    quantity: 6,
+    uom: "Nos",
+    requisitionType: "New Item",
+    enquiryRequired: true,
+    selected: true,
+    selectedSupplierIds: ["SUP-001", "SUP-003"],
+    enquiryStatus: "Ready",
+    quotes: [],
+  },
+  {
+    id: 7,
+    prNumber: "PR/0057/26-27",
+    itemCode: "ITM-PN-018",
+    itemName: "Solenoid Valve",
+    itemDescription: "5/2 way solenoid valve, 24 V DC, 1/4 inch port",
+    quantity: 12,
+    uom: "Nos",
+    requisitionType: "New Item",
+    enquiryRequired: true,
+    selected: true,
+    selectedSupplierIds: ["SUP-002", "SUP-004"],
+    enquiryStatus: "Ready",
+    quotes: [],
+  },
+];
+
+const legacyPurchaseApprovalRequests: PurchaseApprovalRequest[] = [
+  { id: "PR-0053-26-27", prNumber: "PR/0053/26-27", plant: "Plant 2", department: "Maintenance", requestedBy: "Ravi Kumar", submittedDate: "19 Aug 2026", submittedTime: "09:20 AM", itemCount: 5, requiredDate: "22 Aug 2026", amount: 84000, preferredSupplier: { code: "SUP-001", name: "Nova Industrial Supply" }, priority: "High", status: "Pending", requisitionType: "Existing Item" },
+  { id: "PR-0052-26-27", prNumber: "PR/0052/26-27", plant: "Plant 1", department: "Assembly", requestedBy: "Prasad Kumar", submittedDate: "19 Aug 2026", submittedTime: "10:15 AM", itemCount: 3, requiredDate: "27 Aug 2026", amount: 265500, priority: "High", status: "Pending", requisitionType: "New Item" },
+  { id: "PR-0054-26-27", prNumber: "PR/0054/26-27", plant: "Plant 1", department: "Machine Shop", requestedBy: "Suresh Babu", submittedDate: "18 Aug 2026", submittedTime: "04:40 PM", itemCount: 2, requiredDate: "30 Aug 2026", amount: 640000, preferredSupplier: { code: "SUP-004", name: "MechPro Components" }, priority: "Medium", status: "Pending", requisitionType: "New Item" },
+  { id: "PR-0050-26-27", prNumber: "PR/0050/26-27", plant: "Plant 3", department: "Quality", requestedBy: "Meena S", submittedDate: "18 Aug 2026", submittedTime: "02:10 PM", itemCount: 4, requiredDate: "02 Sep 2026", amount: 118750, priority: "Medium", status: "Pending", requisitionType: "Existing Item" },
+  { id: "PR-0049-26-27", prNumber: "PR/0049/26-27", plant: "Plant 2", department: "Assembly", requestedBy: "Anand Raj", submittedDate: "17 Aug 2026", submittedTime: "11:35 AM", itemCount: 6, requiredDate: "05 Sep 2026", amount: 392000, preferredSupplier: { code: "SUP-003", name: "Axis Automation" }, priority: "Low", status: "Pending", requisitionType: "New Item" },
+];
+
+// Purchase records are now supplied by the backend. The old frontend-only demo
+// records remain out of the exported flow data; master options above are still
+// available for form selection.
+export const initialEnquiryLines: PurchaseEnquiryLine[] = [];
+export const purchaseApprovalRequests: PurchaseApprovalRequest[] = [];

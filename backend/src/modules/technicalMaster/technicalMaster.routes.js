@@ -1,0 +1,22 @@
+import { Router } from "express";
+import { asyncHandler } from "../../utils/asyncHandler.js";
+import * as controller from "./technicalMaster.controller.js";
+
+const router = Router();
+router.get("/operation-sources",asyncHandler(controller.listSources));
+router.get("/operations",asyncHandler(controller.listOperations));
+router.post("/operations",asyncHandler(controller.createOperation));
+router.put("/operations/:operationMasterId",asyncHandler(controller.updateOperation));
+router.get("/instruments",asyncHandler(controller.listInstruments));
+router.post("/instruments",asyncHandler(controller.createInstrument));
+router.put("/instruments/:instrumentMasterId",asyncHandler(controller.updateInstrument));
+router.get("/tolerance-grades",asyncHandler(controller.listToleranceGrades));
+router.post("/tolerance-grades",asyncHandler(controller.createToleranceGrade));
+router.put("/tolerance-grades/:toleranceGradeId",asyncHandler(controller.updateToleranceGrade));
+router.get("/rejection-dispositions",asyncHandler(controller.listRejectionDispositions));
+router.post("/rejection-dispositions",asyncHandler(controller.createRejectionDisposition));
+router.put("/rejection-dispositions/:rejectionDispositionId",asyncHandler(controller.updateRejectionDisposition));
+router.get("/rejection-reasons",asyncHandler(controller.listRejectionReasons));
+router.post("/rejection-reasons",asyncHandler(controller.createRejectionReason));
+router.put("/rejection-reasons/:rejectionReasonId",asyncHandler(controller.updateRejectionReason));
+export default router;

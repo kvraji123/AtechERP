@@ -1,0 +1,61 @@
+.gauge-workflow-header-actions { display:flex; align-items:center; gap:9px; }
+.gauge-workflow-header-actions .secondary-action-button,
+.gauge-workflow-header-actions .primary-action-button { min-height:40px; }
+.gauge-workflow-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; overflow:hidden; border:1px solid #dbe3ef; border-radius:11px; background:#dbe3ef; }
+.gauge-workflow-step { position:relative; display:grid; grid-template-columns:28px 1fr; column-gap:9px; min-height:84px; padding:15px; background:#fff; }
+.gauge-workflow-step>span { display:grid; grid-row:span 2; place-items:center; width:26px; height:26px; border-radius:50%; background:#edf1f8; color:#65738b; font-size:12px; font-weight:800; }
+.gauge-workflow-step strong { align-self:end; color:#31415f; font-size:13px; }
+.gauge-workflow-step small { align-self:start; margin-top:4px; color:#728097; font-size:11px; line-height:1.35; }
+.gauge-workflow-step.is-complete>span { background:#e7f7ec; color:#237c3d; }
+.gauge-workflow-step.is-current>span { background:#e9efff; color:#30478a; }
+.gauge-workflow-step.is-current strong { color:#263f82; }
+.gauge-workflow-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; }
+.gauge-workflow-summary>button { display:flex; align-items:center; gap:12px; min-height:88px; padding:14px 15px; border:1px solid #dce3ed; border-radius:11px; background:#fff; color:#465b86; text-align:left; cursor:pointer; transition:border-color .15s ease,box-shadow .15s ease,background .15s ease; }
+.gauge-workflow-summary>button:hover { border-color:#aebce0; background:#fbfcff; }
+.gauge-workflow-summary>button.is-active { border-color:#4458ae; box-shadow:0 0 0 3px rgba(68,88,174,.09); background:#f8faff; color:#273f81; }
+.gauge-workflow-summary>button>span { display:grid; gap:2px; }
+.gauge-workflow-summary small { color:#667791; font-size:10px; font-weight:800; letter-spacing:.02em; text-transform:uppercase; }
+.gauge-workflow-summary strong { color:#233456; font-size:25px; line-height:1; }
+.gauge-workflow-summary em { color:#78869b; font-size:11px; font-style:normal; }
+.gauge-workflow-card { min-height:0; }
+.gauge-workflow-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:18px 20px; border-bottom:1px solid #e7eaf0; }
+.gauge-workflow-card-header h2 { margin:0; color:#263452; font-size:18px; }
+.gauge-workflow-card-header p { margin:5px 0 0; color:#708097; font-size:12px; }
+.gauge-workflow-card-header>span { padding:6px 9px; border-radius:20px; background:#edf2ff; color:#40558f; font-size:11px; font-weight:800; white-space:nowrap; }
+.gauge-workflow-filter-row { display:flex; padding:15px 20px; border-bottom:1px solid #e8ebf1; }
+.gauge-workflow-filter-row .master-search-box { min-width:min(100%,360px); }
+.gauge-dispatch-selection-bar { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 20px; border-bottom:1px solid #dce5f3; background:#f3f7ff; }
+.gauge-dispatch-selection-bar>div:first-child { display:flex; flex:1; flex-direction:column; gap:3px; }
+.gauge-dispatch-selection-bar strong { color:#29468a; font-size:13px; }
+.gauge-dispatch-selection-bar span { color:#637594; font-size:11px; }
+.gauge-dispatch-selection-bar>div:last-child { display:flex; align-items:center; gap:8px; }
+.gauge-dispatch-selection-bar .secondary-action-button,.gauge-dispatch-selection-bar .primary-action-button { min-height:34px; font-size:11px; }
+.gauge-dispatch-form { margin:15px 20px; overflow:hidden; border:1px solid #c5d5ef; border-radius:10px; background:#f8faff; }
+.gauge-dispatch-form header { display:flex; align-items:flex-start; justify-content:space-between; gap:15px; padding:14px 15px; border-bottom:1px solid #dbe4f2; background:#edf4ff; }
+.gauge-dispatch-form h3 { margin:0; color:#243f7d; font-size:15px; }
+.gauge-dispatch-form header p { margin:5px 0 0; color:#647693; font-size:11px; }
+.gauge-dispatch-form header>button { display:grid; place-items:center; width:30px; height:30px; padding:0; border:0; border-radius:6px; background:transparent; color:#a13a36; cursor:pointer; }
+.gauge-dispatch-form header>button:hover { background:#ffecea; }
+.gauge-dispatch-form .master-form-grid { padding:15px; }
+.gauge-dispatch-agency { display:flex; flex-direction:column; justify-content:center; gap:4px; min-height:68px; padding:10px 12px; border:1px solid #d6dfec; border-radius:7px; background:#fff; }
+.gauge-dispatch-agency strong { color:#4c5b77; font-size:11px; }
+.gauge-dispatch-agency span { color:#28447e; font-size:13px; font-weight:800; }
+.gauge-dispatch-agency small,.gauge-dispatch-form .master-field small { color:#73819a; font-size:10px; }
+.gauge-dispatch-form footer { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 15px; border-top:1px solid #dbe4f2; background:#fff; }
+.gauge-dispatch-form footer>span { color:#687994; font-size:11px; }
+.gauge-dispatch-form footer>div { display:flex; gap:8px; }
+.gauge-dispatch-form footer .secondary-action-button,.gauge-dispatch-form footer .primary-action-button { min-height:35px; font-size:11px; }
+.gauge-workflow-table { min-width:1040px; }
+.gauge-workflow-table td { vertical-align:middle; }
+.gauge-workflow-table td small { display:block; margin-top:3px; color:#78869b; font-size:10px; }
+.gauge-workflow-actions { display:flex; align-items:center; justify-content:center; gap:7px; }
+.gauge-workflow-lifecycle-action { display:inline-flex; align-items:center; gap:6px; min-height:33px; border:1px solid #b9c7e4; border-radius:7px; padding:0 9px; background:#f5f8ff; color:#30498d; font-size:11px; font-weight:800; white-space:nowrap; cursor:pointer; }
+.gauge-workflow-lifecycle-action:hover { background:#e8efff; border-color:#8195c7; }
+.gauge-workflow-view-action { display:grid; place-items:center; width:33px; height:33px; border:1px solid #dfe4ec; border-radius:7px; background:#fff; color:#66738a; cursor:pointer; }
+.gauge-workflow-view-action:hover { background:#f7f9fc; color:#324b8c; }
+.gauge-dispatch-history { min-height:0; }
+.gauge-dispatch-history-table { min-width:940px; }
+.gauge-dispatch-history-table td { vertical-align:middle; }
+.gauge-dispatch-empty { min-height:90px; display:grid; place-items:center; color:#77849a; font-size:12px; }
+@media(max-width:1050px){.gauge-workflow-summary{grid-template-columns:repeat(2,minmax(0,1fr));}.gauge-workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:650px){.gauge-workflow-page .master-list-header{align-items:stretch;flex-direction:column}.gauge-workflow-header-actions{justify-content:flex-end}.gauge-workflow-summary,.gauge-workflow-steps{grid-template-columns:1fr}.gauge-workflow-card-header{align-items:stretch;flex-direction:column}.gauge-workflow-card-header>span{align-self:flex-start}.gauge-workflow-filter-row{padding:13px}.gauge-workflow-filter-row .master-search-box{min-width:0}.gauge-workflow-header-actions .secondary-action-button,.gauge-workflow-header-actions .primary-action-button{flex:1;justify-content:center}.gauge-dispatch-selection-bar,.gauge-dispatch-form footer{align-items:stretch;flex-direction:column}.gauge-dispatch-selection-bar>div:last-child,.gauge-dispatch-form footer>div{width:100%}.gauge-dispatch-selection-bar>div:last-child button,.gauge-dispatch-form footer>div button{flex:1;justify-content:center}.gauge-dispatch-form{margin:13px}.gauge-dispatch-form footer>span{text-align:center}}

@@ -1,0 +1,1 @@
+export default function PlaceholderPage(){return <div className="page-container"><div className="empty-content-state large"><h1>Reports</h1><p>Report APIs will be connected after the transaction workflow is validated.</p></div></div>}
