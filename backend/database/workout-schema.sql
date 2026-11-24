@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS marketing_workouts (
   additional_material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   assembly_labour_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  actual_material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   material_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
   turning_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   vmc_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS marketing_workouts (
   special_tool_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   gauge_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   trial_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  sample_cost_percent DECIMAL(7,4) NOT NULL DEFAULT 0,
   sample_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   total_development_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   total_development_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -85,6 +87,8 @@ CREATE TABLE IF NOT EXISTS marketing_workout_process_costs (
   workout_id BIGINT UNSIGNED NOT NULL,
   process_type VARCHAR(50) NOT NULL,
   process_description VARCHAR(300) NULL,
+  total_cycle_time_seconds DECIMAL(14,4) NULL,
+  machine_cost_inr DECIMAL(18,4) NULL,
   cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   display_order INT UNSIGNED NOT NULL DEFAULT 1,
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
@@ -147,6 +151,8 @@ CREATE TABLE IF NOT EXISTS marketing_workout_subpart_process_costs (
   workout_subpart_id BIGINT UNSIGNED NOT NULL,
   process_type VARCHAR(50) NOT NULL,
   process_description VARCHAR(300) NULL,
+  total_cycle_time_seconds DECIMAL(14,4) NULL,
+  machine_cost_inr DECIMAL(18,4) NULL,
   cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   display_order INT UNSIGNED NOT NULL DEFAULT 1,
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
@@ -171,20 +177,22 @@ ON DUPLICATE KEY UPDATE
   active_flag = 'Y';
 
 INSERT INTO marketing_reference_values
-  (reference_type, value_code, display_label, sort_order)
+  (reference_type, value_code, display_label, numeric_value, sort_order)
 VALUES
-  ('MACHINING_PROCESS', 'TURNING', 'Turning', 10),
-  ('MACHINING_PROCESS', 'VMC', 'VMC', 20),
-  ('MACHINING_PROCESS', 'KEYWAY_SPLINE', 'Keyway / Spline', 30),
-  ('MACHINING_PROCESS', 'HEAT_TREATMENT', 'Heat Treatment', 40),
-  ('MACHINING_PROCESS', 'SHAPING_GEAR', 'Shaping / Gear', 50),
-  ('MACHINING_PROCESS', 'OTHER', 'Other Process', 60),
-  ('CURRENCY', 'INR', 'Indian Rupee', 10),
-  ('CURRENCY', 'EUR', 'Euro', 20),
-  ('CURRENCY', 'USD', 'US Dollar', 30),
-  ('CURRENCY', 'GBP', 'British Pound', 40)
+  ('MACHINING_PROCESS', 'TURNING', 'Turning', 300, 10),
+  ('MACHINING_PROCESS', 'VMC', 'VMC', 500, 20),
+  ('MACHINING_PROCESS', 'HMC', 'HMC', 1000, 30),
+  ('MACHINING_PROCESS', 'KEYWAY_SPLINE', 'Keyway / Spline', NULL, 40),
+  ('MACHINING_PROCESS', 'HEAT_TREATMENT', 'Heat Treatment', NULL, 50),
+  ('MACHINING_PROCESS', 'SHAPING_GEAR', 'Shaping / Gear', NULL, 60),
+  ('MACHINING_PROCESS', 'OTHER', 'Other Process', NULL, 70),
+  ('CURRENCY', 'INR', 'Indian Rupee', NULL, 10),
+  ('CURRENCY', 'EUR', 'Euro', NULL, 20),
+  ('CURRENCY', 'USD', 'US Dollar', NULL, 30),
+  ('CURRENCY', 'GBP', 'British Pound', NULL, 40)
 ON DUPLICATE KEY UPDATE
   display_label = VALUES(display_label),
+  numeric_value = COALESCE(numeric_value, VALUES(numeric_value)),
   sort_order = VALUES(sort_order),
   active_flag = 'Y';
 

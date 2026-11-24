@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS marketing_workout_subpart_process_costs (
   workout_subpart_id BIGINT UNSIGNED NOT NULL,
   process_type VARCHAR(50) NOT NULL,
   process_description VARCHAR(300) NULL,
+  total_cycle_time_seconds DECIMAL(14,4) NULL,
+  machine_cost_inr DECIMAL(18,4) NULL,
   cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   display_order INT UNSIGNED NOT NULL DEFAULT 1,
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',

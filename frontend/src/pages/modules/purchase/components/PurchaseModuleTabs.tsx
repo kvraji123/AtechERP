@@ -1,4 +1,4 @@
-import { BadgeCheck, ClipboardCheck, ClipboardPlus, FileSearch, PackageCheck, RadioTower, Scale, ShoppingBag, Warehouse } from "lucide-react";
+import { BadgeCheck, ClipboardCheck, ClipboardPlus, FileSearch, RadioTower, Scale, ShoppingBag } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 
 const steps = [
@@ -9,8 +9,6 @@ const steps = [
   { to: "/purchase/quotation-comparison", label: "Quote Comparison", icon: Scale },
   { to: "/purchase/orders", label: "Purchase Order", icon: ShoppingBag },
   { to: "/purchase/orders/approval", label: "PO Approval", icon: BadgeCheck },
-  { to: "/purchase/gate-entries", label: "Gate Entry", icon: Warehouse },
-  { to: "/purchase/grn", label: "GRN & Receipt", icon: PackageCheck },
 ];
 
 type PurchaseModuleTabsProps = { activeIndex?: number };

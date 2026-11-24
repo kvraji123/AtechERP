@@ -4,6 +4,7 @@ import { recordAudit } from "../../shared/services/audit.service.js";
 import { transitionOrThrow, requireReason } from "../../shared/services/workflow.service.js";
 import { PO_TRANSITIONS } from "../../shared/constants/purchase.js";
 import * as repository from "./purchase-order.repository.js";
+import * as assignmentRepository from "../supplier-assignment/supplier-assignment.repository.js";
 
 export async function list(query, user) {
   const page = Math.max(Number(query.page || 1), 1); const pageSize = Math.min(Math.max(Number(query.pageSize || 20), 1), 100);
@@ -38,6 +39,20 @@ export async function decide(id, action, data, user) {
     const order = await repository.getOrder(id, user.tenantId, connection, true); if (!order) throw new AppError("Purchase order not found.", 404);
     transitionOrThrow(PO_TRANSITIONS, order.status, next);
     await repository.setStatus(connection, id, user.tenantId, next, user.userCode);
+    if (next === "APPROVED") {
+      const supplier = await assignmentRepository.getSupplier(connection, order.supplier_id);
+      if (!supplier) throw new AppError("Supplier is invalid or inactive.", 409);
+      for (const line of order.items || []) {
+        if (!Number(line.item_id)) continue;
+        await repository.upsertItemSupplierRate(connection, {
+          itemId: line.item_id,
+          supplierId: order.supplier_id,
+          purchaseRate: line.unit_price,
+          currencyCode: supplier.currencyCode || "INR",
+          leadTimeDays: null,
+        }, user.userCode);
+      }
+    }
     await repository.insertHistory(connection, [user.tenantId, id, next, reason, order.status, next, user.userCode]);
     await recordAudit({ connection, tenantId: user.tenantId, module: "PURCHASE", entityType: "PURCHASE_ORDER", entityId: id, action: `PO_${next}`, oldValue: { status: order.status }, newValue: { status: next }, performedBy: user.userCode, remarks: reason });
     return repository.getOrder(id, user.tenantId, connection);

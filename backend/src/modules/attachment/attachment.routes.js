@@ -11,6 +11,7 @@ function requireEntityPermission(req, res, next) {
   const type = String(req.params.entityType || "").trim().toUpperCase();
   if (type === "PURCHASE_REQUEST_ITEM") return requirePermission("PR_CREATE", "PR_APPROVE")(req, res, next);
   if (type === "PURCHASE_ORDER") return requirePermission("PO_CREATE", "PO_APPROVE")(req, res, next);
+  if (type === "GRN_ITEM") return requirePermission("GRN_POST")(req, res, next);
   return next();
 }
 

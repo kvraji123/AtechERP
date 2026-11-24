@@ -1,5 +1,11 @@
-import { db } from "../../config/db.js";
+import { cmsDb, db } from "../../config/db.js";
 import { todayInAppTimeZone } from "../../utils/dateTime.js";
+
+const cmsDatabaseName = String(process.env.CMS_DB_NAME || "cms_erp").trim();
+if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(cmsDatabaseName)) {
+  throw new Error("CMS_DB_NAME must be a valid MySQL identifier.");
+}
+const cmsSchema = `\`${cmsDatabaseName}\``;
 
 function filterClause(filters, alias = "B") {
   const clauses = [];
@@ -614,13 +620,13 @@ export async function listCustomerMaterialJobs({ tenantId, filters, limit }) {
   const params = [tenantId];
   if (filters.search) {
     const term = `%${String(filters.search).trim()}%`;
-    clauses.push("(J.job_reference LIKE ? OR E.doc_no LIKE ? OR C.customer_name LIKE ? OR I.item_code LIKE ? OR I.item_description LIKE ?)");
+    clauses.push("(J.job_reference LIKE ? OR COALESCE(E.doc_no,CE.doc_no) LIKE ? OR C.customer_name LIKE ? OR I.item_code LIKE ? OR I.item_description LIKE ?)");
     params.push(term, term, term, term, term);
   }
   const [rows] = await db.execute(
     `SELECT J.customer_material_job_balance_id AS id,J.customer_material_job_balance_id AS customerMaterialJobBalanceId,
             J.customer_id AS customerId,C.customer_code AS customerCode,C.customer_name AS customerName,
-            J.enquiry_id AS enquiryId,E.doc_no AS enquiryNumber,J.job_reference AS jobReference,
+            J.enquiry_id AS enquiryId,COALESCE(E.doc_no,CE.doc_no) AS enquiryNumber,J.job_reference AS jobReference,
             J.quantity_in_process AS quantityInProcess,J.status,J.issued_at AS issuedAt,J.updated_at AS lastUpdatedAt,
             B.inventory_stock_balance_id AS inventoryStockBalanceId,B.warehouse_code AS sourceWarehouseCode,
             B.bin_location AS sourceBinLocation,B.batch_serial_number AS batchSerialNumber,
@@ -631,6 +637,7 @@ export async function listCustomerMaterialJobs({ tenantId, filters, limit }) {
        JOIN item_master I ON I.item_id=J.item_id
        LEFT JOIN uom_master U ON U.uom_id=I.uom_id
        LEFT JOIN marketing_enquiries E ON E.enquiry_id=J.enquiry_id
+       LEFT JOIN ${cmsSchema}.marketing_enquiries CE ON CE.enquiry_id=J.enquiry_id
       WHERE J.tenant_id=? AND J.status='OPEN' AND J.quantity_in_process > 0${clauses.length ? ` AND ${clauses.join(" AND ")}` : ""}
       ORDER BY J.updated_at DESC,J.customer_material_job_balance_id DESC
       LIMIT ${Number(limit)}`,
@@ -683,12 +690,13 @@ export async function insertCustomerMaterialJobBalance(connection, data) {
 
 export async function getCustomerMaterialJobBalanceForUpdate(connection, tenantId, customerMaterialJobBalanceId) {
   const [rows] = await connection.execute(
-    `SELECT J.*,C.customer_name,C.customer_code,E.doc_no AS enquiry_number,I.item_code,I.item_description,U.uom_code
+    `SELECT J.*,C.customer_name,C.customer_code,COALESCE(E.doc_no,CE.doc_no) AS enquiry_number,I.item_code,I.item_description,U.uom_code
        FROM customer_material_job_balance J
        JOIN customer_master C ON C.customer_id=J.customer_id
        JOIN item_master I ON I.item_id=J.item_id
        LEFT JOIN uom_master U ON U.uom_id=I.uom_id
        LEFT JOIN marketing_enquiries E ON E.enquiry_id=J.enquiry_id
+       LEFT JOIN ${cmsSchema}.marketing_enquiries CE ON CE.enquiry_id=J.enquiry_id
       WHERE J.tenant_id=? AND J.customer_material_job_balance_id=?
       FOR UPDATE`,
     [tenantId, Number(customerMaterialJobBalanceId)]
@@ -735,7 +743,13 @@ export async function getEnquiryForCustomer(connection, enquiryId, customerId) {
     `SELECT enquiry_id,doc_no FROM marketing_enquiries WHERE enquiry_id=? AND customer_id=?`,
     [Number(enquiryId), Number(customerId)]
   );
-  return rows[0] || null;
+  if (rows[0]) return rows[0];
+
+  const [cmsRows] = await cmsDb.execute(
+    `SELECT enquiry_id,doc_no FROM marketing_enquiries WHERE enquiry_id=? AND customer_id=?`,
+    [Number(enquiryId), Number(customerId)]
+  );
+  return cmsRows[0] || null;
 }
 
 export async function insertReturnToCustomerDocument(connection, data) {
@@ -893,15 +907,15 @@ export async function listReorderAlerts({ tenantId, limit }) {
             U.uom_code AS uomCode,I.minimum_stock AS minimumStock,I.reorder_level AS reorderLevel,
             COALESCE(SUM(B.quantity_on_hand),0) AS quantityOnHand,
             CASE
-              WHEN COALESCE(MAX(B.updated_at),'1000-01-01') > COALESCE(I.updated_at,'1000-01-01') THEN MAX(B.updated_at)
-              ELSE I.updated_at
+              WHEN COALESCE(MAX(B.updated_at),'1000-01-01') > COALESCE(I.updated_on,'1000-01-01') THEN MAX(B.updated_at)
+              ELSE I.updated_on
             END AS lastUpdatedAt,
             CASE WHEN COALESCE(SUM(B.quantity_on_hand),0)=0 THEN 'OUT_OF_STOCK' ELSE 'BELOW_REORDER' END AS alertStatus
        FROM item_master I
        LEFT JOIN inventory_stock_balance B ON B.item_id=I.item_id AND B.tenant_id=? AND B.stock_owner_type='COMPANY'
        LEFT JOIN uom_master U ON U.uom_id=I.uom_id
       WHERE I.active_flag='Y' AND COALESCE(I.reorder_level,0)>0
-      GROUP BY I.item_id,I.item_code,I.item_description,U.uom_code,I.minimum_stock,I.reorder_level,I.updated_at
+      GROUP BY I.item_id,I.item_code,I.item_description,U.uom_code,I.minimum_stock,I.reorder_level,I.updated_on
      HAVING COALESCE(SUM(B.quantity_on_hand),0)<=I.reorder_level
       ORDER BY lastUpdatedAt DESC,I.item_id DESC
       LIMIT ${Number(limit)}`,

@@ -7,7 +7,7 @@ import { technicalMasterApi } from "../../../api/technicalMaster.api";
 import { useAppFeedback } from "../../../components/AppFeedback";
 import GrnInspectionForm, { type RejectionDispositionOption, type RejectionReasonOption } from "./components/GrnInspectionForm";
 import GrnWorkflowStepper from "./components/GrnWorkflowStepper";
-import PurchaseModuleTabs from "./components/PurchaseModuleTabs";
+import MaterialMovementTabs from "./components/MaterialMovementTabs";
 import type { GrnInspectionCharacteristic, GrnItem, GrnRecord } from "./grnData";
 import { mapGrn } from "./purchaseReceiptMappers";
 import "./PurchaseFlow.css";
@@ -78,7 +78,7 @@ export default function GrnInspectionPage() {
     if (invalid) { setError(`Complete the inspection results, quantity allocation, rejection reason and follow-up action for ${invalid.itemName}.`); return; }
     try {
       const response = await purchaseApi.inspectGrn(value.id,{ items:value.items.map((item) => ({
-        grnItemId:item.id,acceptedQuantity:item.acceptedQuantity,rejectedQuantity:item.rejectedQuantity,onHoldQuantity:item.onHoldQuantity,
+        grnItemId:item.id,inspectionResult:item.inspectionResult,acceptedQuantity:item.acceptedQuantity,rejectedQuantity:item.rejectedQuantity,onHoldQuantity:item.onHoldQuantity,
         inspectionDisposition:item.inspectionDisposition || "PENDING",rejectionReasonId:item.rejectionReasonId,
         rejectionDispositionId:item.rejectionDispositionId,rejectionReason:item.rejectionReason,
         qualityRemarks:item.qualityRemarks,
@@ -87,11 +87,11 @@ export default function GrnInspectionPage() {
       const saved = mapGrn(response.data);
       if (saved.status === "INSPECTION_HOLD") { showSuccess("Failed sample recorded. This lot is on Quality hold and cannot be posted to stock."); setValue(saved); return; }
       showSuccess(saved.status === "REJECTED" ? "Inspection completed with all material rejected." : "Inspection completed. Accepted quantity is ready for stock.");
-      navigate(saved.status === "REJECTED" ? "/purchase/grn" : `/purchase/grn/${saved.id}/stock-receipt`,{replace:true});
+      navigate(saved.status === "REJECTED" ? "/grn-inward" : `/grn-inward/${saved.id}/stock-receipt`,{replace:true});
     } catch (reason) { setError(apiMessage(reason)); }
   };
 
   if (!value) return <div className="purchase-page"><div className="purchase-grn-empty">{error || "Loading GRN…"}</div></div>;
   const readOnly = value.status === "REJECTED" || value.status === "STOCK_POSTED";
-  return <div className="purchase-page"><header className="purchase-page-header"><div className="purchase-title-group"><button type="button" className="purchase-back-button" onClick={() => navigate("/purchase/grn")}><ArrowLeft size={19}/></button><span className="purchase-page-module-icon"><ScanSearch size={19}/></span><div><p>Purchase / GRN</p><h1>Material Inspection</h1><span>Record quality disposition for received material</span></div></div></header><PurchaseModuleTabs/><div className="purchase-grn-page"><GrnWorkflowStepper stage="INSPECTION"/><GrnInspectionForm value={value} error={error} readOnly={readOnly} rejectionReasons={rejectionReasons} rejectionDispositions={rejectionDispositions} onItemChange={(itemId,patch) => { patchItem(itemId,patch); setError(""); }} onCharacteristicChange={(itemId,characteristicId,patch) => { patchCharacteristic(itemId,characteristicId,patch); setError(""); }} onUploadAttachment={(itemId,file) => { void uploadAttachment(itemId,file); }} onRemoveAttachment={(itemId,attachmentId) => { void removeAttachment(itemId,attachmentId); }} uploadingAttachmentItemId={uploadingAttachmentItemId} onBack={() => navigate("/purchase/grn")} onComplete={() => { void complete(); }}/></div></div>;
+  return <div className="purchase-page"><header className="purchase-page-header"><div className="purchase-title-group"><button type="button" className="purchase-back-button" onClick={() => navigate("/grn-inward")}><ArrowLeft size={19}/></button><span className="purchase-page-module-icon"><ScanSearch size={19}/></span><div><p>Material Movement / GRN Inward</p><h1>Material Inspection</h1><span>Record quality disposition for received material</span></div></div></header><MaterialMovementTabs/><div className="purchase-grn-page"><GrnWorkflowStepper stage="INSPECTION"/><GrnInspectionForm value={value} error={error} readOnly={readOnly} rejectionReasons={rejectionReasons} rejectionDispositions={rejectionDispositions} onItemChange={(itemId,patch) => { patchItem(itemId,patch); setError(""); }} onCharacteristicChange={(itemId,characteristicId,patch) => { patchCharacteristic(itemId,characteristicId,patch); setError(""); }} onUploadAttachment={(itemId,file) => { void uploadAttachment(itemId,file); }} onRemoveAttachment={(itemId,attachmentId) => { void removeAttachment(itemId,attachmentId); }} uploadingAttachmentItemId={uploadingAttachmentItemId} onBack={() => navigate("/grn-inward")} onComplete={() => { void complete(); }}/></div></div>;
 }

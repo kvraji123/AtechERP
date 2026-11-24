@@ -8,6 +8,7 @@ export type ItemInspectionCharacteristicRow = {
   specifiedDimension: string;
   toleranceGradeId: string;
   toleranceGradeText: string;
+  manualToleranceGrade?: boolean;
   toleranceMinus: string;
   tolerancePlus: string;
   lsl: string;
@@ -48,8 +49,16 @@ export default function ItemIncomingInspectionPlan({ rows, masters, onChange }: 
       && dimension <= Number(entry.basicSizeTo));
   };
 
-  const update = (index: number, field: keyof ItemInspectionCharacteristicRow, value: string) => {
-    const next = rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row);
+  const toleranceGradeCodes = Array.from(new Set(masters.toleranceGrades
+    .map((entry) => entry.gradeCode.trim())
+    .filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+
+  const update = (index: number, field: keyof ItemInspectionCharacteristicRow, value: string, manualToleranceGrade?: boolean) => {
+    const next = rows.map((row, rowIndex) => rowIndex === index ? {
+      ...row, [field]: value,
+      ...(manualToleranceGrade === undefined ? {} : { manualToleranceGrade }),
+    } : row);
     let current = next[index];
     if (["specifiedDimension", "toleranceGradeText", "toleranceMinus", "tolerancePlus"].includes(field)) {
       const dimension = numberOrNull(current.specifiedDimension);
@@ -93,13 +102,30 @@ export default function ItemIncomingInspectionPlan({ rows, masters, onChange }: 
       <button type="button" className="marketing-add-line-button" onClick={() => onChange([...rows, blankItemInspectionCharacteristic()])}><Plus size={16}/>Add Characteristic</button>
     </div>
     <datalist id="item-inspection-characteristic-options">{masters.characteristics.map((entry) => <option key={entry.characteristicMasterId} value={entry.characteristicName}>{entry.characteristicCode}</option>)}</datalist>
-    <datalist id="item-inspection-tolerance-grade-options">{[...new Set(masters.toleranceGrades.map((entry) => entry.gradeCode))].map((gradeCode) => <option key={gradeCode} value={gradeCode}/>)}</datalist>
     <div className="item-inspection-table-wrap"><table className="item-inspection-table"><thead><tr><th>#</th><th>Characteristic</th><th>Specified Dimension</th><th>Tolerance Grade</th><th>Tol−</th><th>Tol+</th><th>LSL</th><th>USL</th><th>Drawing Grid</th><th>Instrument / Gauge</th><th>Sample Size</th><th>Inspection Frequency</th><th/></tr></thead>
-      <tbody>{rows.map((row, index) => { const grade = matchingGrade(row); return <tr key={row.itemInspectionCharacteristicId ?? `item-inspection-${index}`}>
+      <tbody>{rows.map((row, index) => {
+        const grade = matchingGrade(row);
+        const selectedGradeCode = toleranceGradeCodes.find((code) => code.toUpperCase() === row.toleranceGradeText.trim().toUpperCase());
+        const manualGradeSelected = !selectedGradeCode && Boolean(row.manualToleranceGrade || row.toleranceGradeText);
+        return <tr key={row.itemInspectionCharacteristicId ?? `item-inspection-${index}`}>
         <td className="item-inspection-row-number">{index + 1}</td>
         <td><div className="item-inspection-search"><input list="item-inspection-characteristic-options" value={row.characteristicSearch} onChange={(event) => chooseCharacteristic(index, event.target.value)} placeholder="Search or enter characteristic"/><small className={row.characteristicMasterId ? "matched" : row.characteristicText ? "manual" : ""}>{row.characteristicMasterId ? "Master matched" : row.characteristicText ? "Free text characteristic" : "Search or type a characteristic"}</small></div></td>
         <td><input type="number" min="0" step="0.0001" value={row.specifiedDimension} onChange={(event) => update(index, "specifiedDimension", event.target.value)}/></td>
-        <td><div className="item-inspection-grade"><input list="item-inspection-tolerance-grade-options" value={row.toleranceGradeText} onChange={(event) => update(index, "toleranceGradeText", event.target.value)} placeholder="Type grade"/><small className={grade ? "matched" : "manual"}>{grade ? "Master matched" : "Manual tolerance"}</small></div></td>
+        <td><div className="item-inspection-grade">
+          <select aria-label={`Tolerance grade ${index + 1}`} value={manualGradeSelected ? "__MANUAL__" : selectedGradeCode ?? ""} onChange={(event) => {
+            const value = event.target.value;
+            const nextGradeText = value === "__MANUAL__"
+              ? selectedGradeCode ? "" : row.toleranceGradeText
+              : value;
+            update(index, "toleranceGradeText", nextGradeText, value === "__MANUAL__");
+          }}>
+            <option value="">Select grade</option>
+            {toleranceGradeCodes.map((gradeCode) => <option key={gradeCode} value={gradeCode}>{gradeCode}</option>)}
+            <option value="__MANUAL__">Manual / custom grade</option>
+          </select>
+          {manualGradeSelected && <input aria-label={`Custom tolerance grade ${index + 1}`} value={row.toleranceGradeText} onChange={(event) => update(index, "toleranceGradeText", event.target.value, true)} placeholder="Enter custom grade"/>}
+          <small className={grade ? "matched" : "manual"}>{grade ? "Master matched" : "Manual tolerance"}</small>
+        </div></td>
         <td><input type="number" min="0" step="0.0001" readOnly={Boolean(grade)} value={row.toleranceMinus} onChange={(event) => update(index, "toleranceMinus", event.target.value)}/></td>
         <td><input type="number" min="0" step="0.0001" readOnly={Boolean(grade)} value={row.tolerancePlus} onChange={(event) => update(index, "tolerancePlus", event.target.value)}/></td>
         <td><input readOnly value={row.lsl}/></td><td><input readOnly value={row.usl}/></td>

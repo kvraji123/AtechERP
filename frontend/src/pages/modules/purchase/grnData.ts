@@ -4,7 +4,7 @@ import { updateGateEntryStatus } from "./gateEntryData";
 import type { PurchaseOrderApprovalRecord } from "./purchaseFlowStore";
 
 export type GrnStatus = "DRAFT" | "INSPECTION_PENDING" | "INSPECTION_HOLD" | "READY_FOR_STOCK" | "OUTSOURCING_WIP" | "REJECTED" | "STOCK_POSTED";
-export type GrnListFilter = "ALL" | GrnStatus | "REJECTED_INSPECTION";
+export type GrnListFilter = "ALL" | GrnStatus | "REJECTED_INSPECTION" | "PENDING_PO_RECEIPTS";
 export type InspectionResult = "PENDING" | "ACCEPTED" | "PARTIAL" | "REJECTED" | "ON_HOLD";
 export type InspectionCharacteristicResult = "PENDING" | "PASS" | "FAIL";
 export type InspectionDisposition = "PENDING" | "HOLD" | "FULL_INSPECTION" | "REJECT_LOT" | "PARTIAL_ACCEPT" | "DEVIATION_ACCEPT";
@@ -41,9 +41,23 @@ export type GrnRejectionAttachment = {
   uploadedAt: string;
 };
 
+export type GrnMtcCertificate = {
+  attachmentId: number;
+  grnItemId: number;
+  attachmentType?: string;
+  attachmentName?: string;
+  fileName: string;
+  fileUrl: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  uploadedBy: string;
+  uploadedAt: string;
+};
+
 export type GrnItem = {
   id: number;
   itemId?: number;
+  itemGroupCode?: string;
   purchaseOrderItemId?: number;
   itemCode: string;
   itemName: string;
@@ -56,6 +70,8 @@ export type GrnItem = {
   taxPercent?: number;
   batchSerialNumber: string;
   inspectionRequired: boolean;
+  mtcApplicable?: boolean;
+  mtcCertificates?: GrnMtcCertificate[];
   acceptedQuantity: number;
   rejectedQuantity: number;
   onHoldQuantity: number;
@@ -69,6 +85,7 @@ export type GrnItem = {
   rejectionAttachments?: GrnRejectionAttachment[];
   qualityRemarks: string;
   warehouse: string;
+  subinventoryCode: string;
   binLocation: string;
 };
 
@@ -110,23 +127,42 @@ export type GrnRecord = {
   items: GrnItem[];
 };
 
+export type PendingPoReceipt = {
+  purchaseOrderItemId: number;
+  purchaseOrderId: number;
+  poNumber: string;
+  poDate?: string | null;
+  expectedDeliveryDate?: string | null;
+  supplierCode?: string | null;
+  supplierName: string;
+  lineNumber: number;
+  itemCode: string;
+  itemDescription: string;
+  itemSpecification?: string | null;
+  uomCode: string;
+  orderedQuantity: number | string;
+  acceptedQuantity: number | string;
+  pendingQuantity: number | string;
+  lineStatus: string;
+};
+
 const STORAGE_KEY = "atech.purchase.grn-records.v1";
 
 const legacySeedRecords: GrnRecord[] = [
   {
     id: "GRN-0023", grnNumber: "GRN/2026-27/0023", gateEntryId: "GE-0024", gateEntryNumber: "GE/2026-27/0024", poId: "PO-DRAFT-SUP-003", poNumber: "PO/2026/0292", supplierName: "Axis Automation", supplierCode: "SUP-003", receiptType: "REGULAR_PURCHASE", customerId: null, customerName: "", customerPlantCode: "", receiptDate: "2026-08-23", supplierInvoiceNumber: "AX/INV/1842", supplierInvoiceDate: "2026-08-22", deliveryChallanNumber: "AX/DC/902", attachmentName: "axis-invoice-1842.pdf", receivedBy: "Stores User", stockPostingDate: "", remarks: "Material received in sealed packages.", status: "INSPECTION_PENDING",
     items: [
-      { id: 1, itemCode: "ITM-EL-001", itemName: "Servo Motor", specification: "1.5 kW, 3000 RPM with encoder", uom: "Nos", orderedQuantity: 10, previouslyReceivedQuantity: 0, currentReceivedQuantity: 10, batchSerialNumber: "SM-AUG26", inspectionRequired: true, acceptedQuantity: 0, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "PENDING", rejectionReason: "", qualityRemarks: "", warehouse: "Main Stores", binLocation: "" },
-      { id: 2, itemCode: "ITM-ME-014", itemName: "Linear Guide", specification: "HGR25CA, 1000 mm rail", uom: "Nos", orderedQuantity: 20, previouslyReceivedQuantity: 0, currentReceivedQuantity: 20, batchSerialNumber: "LG-0826", inspectionRequired: true, acceptedQuantity: 0, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "PENDING", rejectionReason: "", qualityRemarks: "", warehouse: "Main Stores", binLocation: "" },
+      { id: 1, itemCode: "ITM-EL-001", itemName: "Servo Motor", specification: "1.5 kW, 3000 RPM with encoder", uom: "Nos", orderedQuantity: 10, previouslyReceivedQuantity: 0, currentReceivedQuantity: 10, batchSerialNumber: "SM-AUG26", inspectionRequired: true, acceptedQuantity: 0, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "PENDING", rejectionReason: "", qualityRemarks: "", warehouse: "Main Stores", subinventoryCode: "", binLocation: "" },
+      { id: 2, itemCode: "ITM-ME-014", itemName: "Linear Guide", specification: "HGR25CA, 1000 mm rail", uom: "Nos", orderedQuantity: 20, previouslyReceivedQuantity: 0, currentReceivedQuantity: 20, batchSerialNumber: "LG-0826", inspectionRequired: true, acceptedQuantity: 0, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "PENDING", rejectionReason: "", qualityRemarks: "", warehouse: "Main Stores", subinventoryCode: "", binLocation: "" },
     ],
   },
   {
     id: "GRN-0022", grnNumber: "GRN/2026-27/0022", gateEntryId: "GE-0023", gateEntryNumber: "GE/2026-27/0023", poId: "PO-DRAFT-SUP-001", poNumber: "PO/2026/0289", supplierName: "Nova Industrial Supply", supplierCode: "SUP-001", receiptType: "REGULAR_PURCHASE", customerId: null, customerName: "", customerPlantCode: "", receiptDate: "2026-08-22", supplierInvoiceNumber: "NIS/INV/776", supplierInvoiceDate: "2026-08-21", deliveryChallanNumber: "NIS/DC/381", attachmentName: "nova-invoice-776.pdf", receivedBy: "Quality User", stockPostingDate: "", remarks: "One item partly rejected.", status: "READY_FOR_STOCK",
-    items: [{ id: 1, itemCode: "ITM-TF-015", itemName: "Cutting Inserts", specification: "CNMG carbide inserts", uom: "Nos", orderedQuantity: 100, previouslyReceivedQuantity: 0, currentReceivedQuantity: 100, batchSerialNumber: "CI-776", inspectionRequired: true, acceptedQuantity: 96, rejectedQuantity: 4, onHoldQuantity: 0, inspectionResult: "PARTIAL", rejectionReason: "Four inserts have chipped edges", qualityRemarks: "Accepted quantity may be stocked.", warehouse: "Main Stores", binLocation: "" }],
+    items: [{ id: 1, itemCode: "ITM-TF-015", itemName: "Cutting Inserts", specification: "CNMG carbide inserts", uom: "Nos", orderedQuantity: 100, previouslyReceivedQuantity: 0, currentReceivedQuantity: 100, batchSerialNumber: "CI-776", inspectionRequired: true, acceptedQuantity: 96, rejectedQuantity: 4, onHoldQuantity: 0, inspectionResult: "PARTIAL", rejectionReason: "Four inserts have chipped edges", qualityRemarks: "Accepted quantity may be stocked.", warehouse: "Main Stores", subinventoryCode: "", binLocation: "" }],
   },
   {
     id: "GRN-0021", grnNumber: "GRN/2026-27/0021", gateEntryId: "GE-0022", gateEntryNumber: "GE/2026-27/0022", poId: "PO-DRAFT-SUP-005", poNumber: "PO/2026/0284", supplierName: "Bharat Electricals", supplierCode: "SUP-005", receiptType: "REGULAR_PURCHASE", customerId: null, customerName: "", customerPlantCode: "", receiptDate: "2026-08-21", supplierInvoiceNumber: "BE/INV/2418", supplierInvoiceDate: "2026-08-20", deliveryChallanNumber: "BE/DC/118", attachmentName: "bharat-invoice-2418.pdf", receivedBy: "Stores User", stockPostingDate: "2026-08-22", remarks: "Stock posting completed.", status: "STOCK_POSTED",
-    items: [{ id: 1, itemCode: "ITM-EC-031", itemName: "Power Cable", specification: "4 sq.mm copper flexible cable", uom: "Mtr", orderedQuantity: 200, previouslyReceivedQuantity: 0, currentReceivedQuantity: 200, batchSerialNumber: "PC-2418", inspectionRequired: false, acceptedQuantity: 200, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "ACCEPTED", rejectionReason: "", qualityRemarks: "Inspection not required.", warehouse: "Main Stores", binLocation: "ELEC-A-04" }],
+    items: [{ id: 1, itemCode: "ITM-EC-031", itemName: "Power Cable", specification: "4 sq.mm copper flexible cable", uom: "Mtr", orderedQuantity: 200, previouslyReceivedQuantity: 0, currentReceivedQuantity: 200, batchSerialNumber: "PC-2418", inspectionRequired: false, acceptedQuantity: 200, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "ACCEPTED", rejectionReason: "", qualityRemarks: "Inspection not required.", warehouse: "Main Stores", subinventoryCode: "GENERAL", binLocation: "ELEC-A-04" }],
   },
 ];
 
@@ -161,6 +197,6 @@ export const createGrnDraft = (gateEntry: GateEntryRecord, po?: PurchaseOrderApp
   const sourceItems = po?.lines.length ? po.lines.map((line) => ({ itemCode: line.itemCode, itemName: line.itemName, specification: line.specification, uom: line.uom, quantity: line.quantity })) : Array.from({ length: Math.max(1, gateEntry.itemCount) }, (_, index) => ({ itemCode: `ITEM-${String(index + 1).padStart(3, "0")}`, itemName: `Received Item ${index + 1}`, specification: "Refer approved purchase order", uom: "Nos", quantity: Math.max(1, Math.round(gateEntry.totalQuantity / Math.max(1, gateEntry.itemCount))) }));
   return {
     id: grnNumber.split("/").join("-"), grnNumber, gateEntryId: gateEntry.id, gateEntryNumber: gateEntry.gateEntryNumber, poId: gateEntry.poId, poNumber: gateEntry.poNumber, supplierName: gateEntry.supplierName, supplierCode: gateEntry.supplierCode, receiptType: "REGULAR_PURCHASE", customerId: null, customerName: "", customerPlantCode: "", receiptDate: todayInAppTimeZone(), supplierInvoiceNumber: "", supplierInvoiceDate: "", deliveryChallanNumber: "", attachmentName: "", receivedBy: "Stores User", stockPostingDate: "", remarks: "", status: "DRAFT",
-    items: sourceItems.map((item, index) => ({ id: index + 1, itemCode: item.itemCode, itemName: item.itemName, specification: item.specification, uom: item.uom, orderedQuantity: item.quantity, previouslyReceivedQuantity: 0, currentReceivedQuantity: 0, batchSerialNumber: "", inspectionRequired: true, acceptedQuantity: 0, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "PENDING", rejectionReason: "", qualityRemarks: "", warehouse: "Main Stores", binLocation: "" })),
+    items: sourceItems.map((item, index) => ({ id: index + 1, itemCode: item.itemCode, itemName: item.itemName, specification: item.specification, uom: item.uom, orderedQuantity: item.quantity, previouslyReceivedQuantity: 0, currentReceivedQuantity: 0, batchSerialNumber: "", inspectionRequired: true, acceptedQuantity: 0, rejectedQuantity: 0, onHoldQuantity: 0, inspectionResult: "PENDING", rejectionReason: "", qualityRemarks: "", warehouse: "Main Stores", subinventoryCode: "", binLocation: "" })),
   };
 };

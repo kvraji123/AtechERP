@@ -1,53 +1,60 @@
+import { lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import AppLayout from "./layout/AppLayout";
-import DashboardPage from "./pages/modules/dashboard/DashboardPage";
 
-import SupplierPage from "./pages/masters/SupplierPage";
-import SupplierFormPage from "./pages/masters/SupplierFormPage";
-import CustomerPage from "./pages/masters/CustomerPage";
-import CustomerFormPage from "./pages/masters/CustomerFormPage";
-import PartPage from "./pages/masters/PartPage";
-import PartFormPage from "./pages/masters/PartFormPage";
-import ItemPage from "./pages/masters/ItemPage";
-import ItemFormPage from "./pages/masters/ItemFormPage";
-import MachinePage from "./pages/masters/MachinePage";
-import MachineFormPage from "./pages/masters/MachineFormPage";
-import GaugeMasterPage from "./pages/masters/GaugeMasterPage";
-import GaugeCalibrationWorkflowPage from "./pages/masters/GaugeCalibrationWorkflowPage";
-import GaugeRegistrationPage from "./pages/masters/GaugeRegistrationPage";
-import GaugeDetailPage from "./pages/masters/GaugeDetailPage";
-import TechnicalMasterPage from "./pages/masters/TechnicalMasterPage";
-
-import MarketingListPage from "./pages/modules/marketing/MarketingListPage";
-import EnquiryFormPage from "./pages/modules/marketing/EnquiryFormPage";
-import FeasibilityPage from "./pages/modules/marketing/FeasibilityPage";
-import WorkoutPage from "./pages/modules/marketing/WorkoutPage";
-import QuotationPage from "./pages/modules/marketing/QuotationPage";
-import CreatePurchaseRequestPage from "./pages/modules/purchase/CreatePurchaseRequestPage";
-import PurchaseRequestListPage from "./pages/modules/purchase/PurchaseRequestListPage";
-import CreatePurchaseEnquiryPage from "./pages/modules/purchase/CreatePurchaseEnquiryPage";
-import CreateRfqQueuePage from "./pages/modules/purchase/CreateRfqQueuePage";
-import PurchaseApprovalQueuePage from "./pages/modules/purchase/PurchaseApprovalQueuePage";
-import PurchaseApprovalPage from "./pages/modules/purchase/PurchaseApprovalPage";
-import QuotationComparisonPage from "./pages/modules/purchase/QuotationComparisonPage";
-import CreatePurchaseOrderPage from "./pages/modules/purchase/CreatePurchaseOrderPage";
-import PurchaseOrderListPage from "./pages/modules/purchase/PurchaseOrderListPage";
-import PurchaseOrderApprovalPage from "./pages/modules/purchase/PurchaseOrderApprovalPage";
-import PurchaseOrderApprovalQueuePage from "./pages/modules/purchase/PurchaseOrderApprovalQueuePage";
-import PurchaseCommandCenterPage from "./pages/modules/purchase/PurchaseCommandCenterPage";
-import RfqTrackingPage from "./pages/modules/purchase/RfqTrackingPage";
-import RfqEmailOutboxPage from "./pages/modules/purchase/RfqEmailOutboxPage";
-import GateEntryListPage from "./pages/modules/purchase/GateEntryListPage";
-import CreateGateEntryPage from "./pages/modules/purchase/CreateGateEntryPage";
-import SupplierAssignmentPage from "./pages/modules/purchase/SupplierAssignmentPage";
-import GrnListPage from "./pages/modules/purchase/GrnListPage";
-import CreateGrnInwardPage from "./pages/modules/purchase/CreateGrnInwardPage";
-import GrnInspectionPage from "./pages/modules/purchase/GrnInspectionPage";
-import GrnStockReceiptPage from "./pages/modules/purchase/GrnStockReceiptPage";
-import InventoryPage from "./pages/modules/inventory/InventoryPage";
-import CustomerMaterialControlPage from "./pages/modules/inventory/CustomerMaterialControlPage";
-import OutsourcingWipPage from "./pages/modules/inventory/OutsourcingWipPage";
+// Load functional areas when their route is opened, rather than in the first page load.
+const DashboardPage = lazy(() => import("./pages/modules/dashboard/DashboardPage"));
+const SupplierPage = lazy(() => import("./pages/masters/SupplierPage"));
+const SupplierFormPage = lazy(() => import("./pages/masters/SupplierFormPage"));
+const CustomerPage = lazy(() => import("./pages/masters/CustomerPage"));
+const CustomerFormPage = lazy(() => import("./pages/masters/CustomerFormPage"));
+const PartPage = lazy(() => import("./pages/masters/PartPage"));
+const PartFormPage = lazy(() => import("./pages/masters/PartFormPage"));
+const ItemPage = lazy(() => import("./pages/masters/ItemPage"));
+const ItemFormPage = lazy(() => import("./pages/masters/ItemFormPage"));
+const MachinePage = lazy(() => import("./pages/masters/MachinePage"));
+const MachineFormPage = lazy(() => import("./pages/masters/MachineFormPage"));
+const GaugeMasterPage = lazy(() => import("./pages/masters/GaugeMasterPage"));
+const GaugeCalibrationWorkflowPage = lazy(() => import("./pages/masters/GaugeCalibrationWorkflowPage"));
+const GaugeRegistrationPage = lazy(() => import("./pages/masters/GaugeRegistrationPage"));
+const GaugeDetailPage = lazy(() => import("./pages/masters/GaugeDetailPage"));
+const TechnicalMasterPage = lazy(() => import("./pages/masters/TechnicalMasterPage"));
+const LocationMasterPage = lazy(() => import("./pages/masters/LocationMasterPage"));
+const MarketingListPage = lazy(() => import("./pages/modules/marketing/MarketingListPage"));
+const EnquiryFormPage = lazy(() => import("./pages/modules/marketing/EnquiryFormPage"));
+const FeasibilityPage = lazy(() => import("./pages/modules/marketing/FeasibilityPage"));
+const WorkoutPage = lazy(() => import("./pages/modules/marketing/WorkoutPage"));
+const QuotationPage = lazy(() => import("./pages/modules/marketing/QuotationPage"));
+const CreatePurchaseRequestPage = lazy(() => import("./pages/modules/purchase/CreatePurchaseRequestPage"));
+const PurchaseRequestListPage = lazy(() => import("./pages/modules/purchase/PurchaseRequestListPage"));
+const CreatePurchaseEnquiryPage = lazy(() => import("./pages/modules/purchase/CreatePurchaseEnquiryPage"));
+const CreateRfqQueuePage = lazy(() => import("./pages/modules/purchase/CreateRfqQueuePage"));
+const PurchaseApprovalQueuePage = lazy(() => import("./pages/modules/purchase/PurchaseApprovalQueuePage"));
+const PurchaseApprovalPage = lazy(() => import("./pages/modules/purchase/PurchaseApprovalPage"));
+const QuotationComparisonPage = lazy(() => import("./pages/modules/purchase/QuotationComparisonPage"));
+const CreatePurchaseOrderPage = lazy(() => import("./pages/modules/purchase/CreatePurchaseOrderPage"));
+const PurchaseOrderListPage = lazy(() => import("./pages/modules/purchase/PurchaseOrderListPage"));
+const PurchaseOrderApprovalPage = lazy(() => import("./pages/modules/purchase/PurchaseOrderApprovalPage"));
+const PurchaseOrderApprovalQueuePage = lazy(() => import("./pages/modules/purchase/PurchaseOrderApprovalQueuePage"));
+const RfqTrackingPage = lazy(() => import("./pages/modules/purchase/RfqTrackingPage"));
+const RfqEmailOutboxPage = lazy(() => import("./pages/modules/purchase/RfqEmailOutboxPage"));
+const GateEntryListPage = lazy(() => import("./pages/modules/purchase/GateEntryListPage"));
+const CreateGateEntryPage = lazy(() => import("./pages/modules/purchase/CreateGateEntryPage"));
+const SupplierAssignmentPage = lazy(() => import("./pages/modules/purchase/SupplierAssignmentPage"));
+const GrnListPage = lazy(() => import("./pages/modules/purchase/GrnListPage"));
+const CreateGrnInwardPage = lazy(() => import("./pages/modules/purchase/CreateGrnInwardPage"));
+const GrnInspectionPage = lazy(() => import("./pages/modules/purchase/GrnInspectionPage"));
+const GrnStockReceiptPage = lazy(() => import("./pages/modules/purchase/GrnStockReceiptPage"));
+const InventoryPage = lazy(() => import("./pages/modules/inventory/InventoryPage"));
+const InventoryControlPage = lazy(() => import("./pages/modules/inventory/InventoryControlPage"));
+const CustomerMaterialControlPage = lazy(() => import("./pages/modules/inventory/CustomerMaterialControlPage"));
+const OutsourcingWipPage = lazy(() => import("./pages/modules/inventory/OutsourcingWipPage"));
+const MaterialOutwardPage = lazy(() => import("./pages/modules/inventory/MaterialOutwardPage"));
+const GateExitPage = lazy(() => import("./pages/modules/inventory/GateExitPage"));
+const ToolingLifecyclePage = lazy(() => import("./pages/modules/tooling/ToolingLifecyclePage"));
+const InProcessInspectionPage = lazy(() => import("./pages/modules/operations/InProcessInspectionPage"));
+const UserAccountsPage = lazy(() => import("./pages/admin/UserAccountsPage"));
 
 export default function App() {
   return (
@@ -127,9 +134,13 @@ export default function App() {
         <Route path="/masters/gauges/workflow" element={<GaugeCalibrationWorkflowPage />} />
         <Route path="/masters/gauges/register" element={<GaugeRegistrationPage />} />
         <Route path="/masters/gauges/:gaugeMasterId" element={<GaugeDetailPage />} />
+        <Route path="/masters/locations" element={<LocationMasterPage />} />
         <Route path="/masters/operations" element={<TechnicalMasterPage kind="operations" />} />
         <Route path="/masters/instruments" element={<TechnicalMasterPage kind="instruments" />} />
+        <Route path="/masters/departments" element={<TechnicalMasterPage kind="departments" />} />
         <Route path="/masters/tolerance-grades" element={<TechnicalMasterPage kind="tolerance-grades" />} />
+        <Route path="/masters/inspection-characteristics" element={<TechnicalMasterPage kind="inspection-characteristics" />} />
+        <Route path="/masters/inspection-frequencies" element={<TechnicalMasterPage kind="inspection-frequencies" />} />
         <Route path="/masters/rejection-reasons" element={<TechnicalMasterPage kind="rejection-reasons" />} />
         <Route path="/masters/rejection-dispositions" element={<TechnicalMasterPage kind="rejection-dispositions" />} />
 
@@ -165,7 +176,7 @@ export default function App() {
 
         <Route
           path="/purchase"
-          element={<PurchaseCommandCenterPage />}
+          element={<Navigate to="/purchase/requests" replace />}
         />
 
         <Route
@@ -254,6 +265,16 @@ export default function App() {
         <Route path="/purchase/grn/:grnId/inspection" element={<GrnInspectionPage />} />
         <Route path="/purchase/grn/:grnId/stock-receipt" element={<GrnStockReceiptPage />} />
 
+        <Route path="/gate-entry" element={<GateEntryListPage />} />
+        <Route path="/gate-entry/new" element={<CreateGateEntryPage />} />
+        <Route path="/grn-inward" element={<GrnListPage />} />
+        <Route path="/grn-inward/new" element={<CreateGrnInwardPage />} />
+        <Route path="/grn-inward/:grnId/inward" element={<CreateGrnInwardPage />} />
+        <Route path="/grn-inward/:grnId/inspection" element={<GrnInspectionPage />} />
+        <Route path="/grn-inward/:grnId/stock-receipt" element={<GrnStockReceiptPage />} />
+        <Route path="/material-outward" element={<MaterialOutwardPage />} />
+        <Route path="/gate-exit" element={<GateExitPage />} />
+
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/inventory/stock" element={<InventoryPage />} />
         <Route path="/inventory/transactions" element={<InventoryPage />} />
@@ -263,6 +284,16 @@ export default function App() {
         <Route path="/inventory/customer-material" element={<CustomerMaterialControlPage />} />
         <Route path="/inventory/return-to-customer" element={<CustomerMaterialControlPage />} />
         <Route path="/inventory/outsourcing-wip" element={<OutsourcingWipPage />} />
+        <Route path="/inventory/control" element={<InventoryControlPage />} />
+
+        <Route path="/tooling" element={<ToolingLifecyclePage />} />
+        <Route path="/masters/tools" element={<ToolingLifecyclePage />} />
+        <Route path="/operations/work-order-inspection" element={<InProcessInspectionPage />} />
+        <Route path="/operations/work-order-inspection/create" element={<InProcessInspectionPage />} />
+        <Route path="/operations/work-order-inspection/inspect" element={<InProcessInspectionPage />} />
+        <Route path="/operations/in-process-inspection" element={<Navigate to="/operations/work-order-inspection" replace />} />
+        <Route path="/tooling/items/*" element={<Navigate to="/masters/items" replace />} />
+        <Route path="/admin/users" element={<UserAccountsPage />} />
       </Route>
     </Routes>
   );

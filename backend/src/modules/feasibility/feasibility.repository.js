@@ -1,6 +1,6 @@
 import { db } from "../../config/db.js";
 
-export async function getPart(enquiryPartId, connection = db) {
+export async function getPart(enquiryPartId, connection = db, masterConnection = connection) {
   const [rows] = await connection.execute(
     `
       SELECT
@@ -11,24 +11,27 @@ export async function getPart(enquiryPartId, connection = db) {
         E.customer_id,
         E.current_stage,
         E.enquiry_status,
-        E.save_status AS enquiry_save_status,
-        C.billing_address,
-        C.delivery_address,
-        C.contact_person_name,
-        C.phone_number,
-        C.mobile_number,
-        C.fax_number,
-        C.email_address
+        E.save_status AS enquiry_save_status
       FROM marketing_enquiry_parts P
       INNER JOIN marketing_enquiries E ON E.enquiry_id = P.enquiry_id
-      INNER JOIN customer_master C ON C.customer_id = E.customer_id
       WHERE P.enquiry_part_id = ?
         AND P.active_flag = 'Y'
     `,
     [Number(enquiryPartId)]
   );
 
-  return rows[0] || null;
+  if (!rows[0]) return null;
+  const part = rows[0];
+  const [customers] = part.customer_id
+    ? await masterConnection.execute(
+      `SELECT billing_address,delivery_address,contact_person_name,
+              phone_number,mobile_number,email_address
+         FROM customer_master
+        WHERE customer_id=?`,
+      [Number(part.customer_id)]
+    )
+    : [[]];
+  return { ...part, ...(customers[0] || {}) };
 }
 
 export async function getEnquiryParts(enquiryId, connection = db) {
@@ -197,7 +200,6 @@ export async function upsertFeasibility(connection, part, data, userCode) {
     communicationAddress: data.communicationAddress,
     contactPerson: data.contactPerson,
     telephoneNumber: data.telephoneNumber,
-    faxNumber: data.faxNumber,
     emailAddress: data.emailAddress,
     isNewCustomer: data.isNewCustomer,
     existingProductsDetails: data.existingProductsDetails,
@@ -242,7 +244,7 @@ export async function upsertFeasibility(connection, part, data, userCode) {
     `
       INSERT INTO marketing_feasibilities (
         enquiry_id, enquiry_part_id, feasibility_date,
-        communication_address, contact_person, telephone_number, fax_number, email_address,
+        communication_address, contact_person, telephone_number, email_address,
         is_new_customer, existing_products_details,
         similar_product_processing, similar_product_details,
         drawing_reviewed_completely, drawing_requirements_understood,
@@ -260,7 +262,7 @@ export async function upsertFeasibility(connection, part, data, userCode) {
         save_status, active_flag, created_by, updated_by
       ) VALUES (
         :enquiryId, :enquiryPartId, :feasibilityDate,
-        :communicationAddress, :contactPerson, :telephoneNumber, :faxNumber, :emailAddress,
+        :communicationAddress, :contactPerson, :telephoneNumber, :emailAddress,
         :isNewCustomer, :existingProductsDetails,
         :similarProductProcessing, :similarProductDetails,
         :drawingReviewedCompletely, :drawingRequirementsUnderstood,
@@ -282,7 +284,6 @@ export async function upsertFeasibility(connection, part, data, userCode) {
         communication_address = VALUES(communication_address),
         contact_person = VALUES(contact_person),
         telephone_number = VALUES(telephone_number),
-        fax_number = VALUES(fax_number),
         email_address = VALUES(email_address),
         is_new_customer = VALUES(is_new_customer),
         existing_products_details = VALUES(existing_products_details),

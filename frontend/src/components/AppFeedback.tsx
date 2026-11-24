@@ -30,6 +30,8 @@ type ConfirmationState = Required<ConfirmOptions> & {
 
 type AppFeedbackValue = {
   showSuccess: (message: string) => void;
+  showError: (message: string) => void;
+  clearError: (message?: string) => void;
   confirmDelete: (options: ConfirmOptions | string) => Promise<boolean>;
   confirmAction: (options: ConfirmOptions | string) => Promise<boolean>;
 };
@@ -38,6 +40,7 @@ const AppFeedbackContext = createContext<AppFeedbackValue | null>(null);
 
 export function AppFeedbackProvider({ children }: { children: ReactNode }) {
   const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [confirmation, setConfirmation] =
     useState<ConfirmationState | null>(null);
   const successTimer = useRef<number | null>(null);
@@ -52,6 +55,14 @@ export function AppFeedbackProvider({ children }: { children: ReactNode }) {
       setSuccessMessage("");
       successTimer.current = null;
     }, 2400);
+  }, []);
+
+  const showError = useCallback((message: string) => {
+    setErrorMessage(message);
+  }, []);
+
+  const clearError = useCallback((message?: string) => {
+    setErrorMessage((current) => !message || current === message ? "" : current);
   }, []);
 
   const confirmDelete = useCallback(
@@ -114,8 +125,8 @@ export function AppFeedbackProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ showSuccess, confirmDelete, confirmAction }),
-    [confirmAction, confirmDelete, showSuccess]
+    () => ({ showSuccess, showError, clearError, confirmDelete, confirmAction }),
+    [clearError, confirmAction, confirmDelete, showError, showSuccess]
   );
 
   return (
@@ -138,6 +149,29 @@ export function AppFeedbackProvider({ children }: { children: ReactNode }) {
               type="button"
               aria-label="Close success notification"
               onClick={() => setSuccessMessage("")}
+            >
+              <X size={17} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div
+          className="app-error-banner-layer"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="app-error-banner">
+            <AlertTriangle size={20} />
+            <div>
+              <strong>Unable to continue</strong>
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              aria-label="Close error notification"
+              onClick={() => clearError()}
             >
               <X size={17} />
             </button>

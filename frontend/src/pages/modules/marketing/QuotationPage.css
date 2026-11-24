@@ -20,12 +20,21 @@
 .quotation-header-grid .span-2, .quotation-email-grid .span-2 { grid-column: span 2; }
 .quotation-email-grid .span-full { grid-column: 1 / -1; }
 .quotation-table-wrap { overflow: auto; }
-.quotation-items-table { width: 100%; min-width: 1320px; border-collapse: collapse; font-size: 12px; }
+.quotation-items-table { width: 100%; min-width: 1450px; border-collapse: collapse; font-size: 12px; }
 .quotation-items-table th { padding: 9px 8px; background: #f3f5f9; color: #4b5870; text-align: left; white-space: nowrap; font-size: 10px; text-transform: uppercase; }
 .quotation-items-table th small { display: block; margin-top: 2px; color: #758197; font-size: 9px; font-weight: 700; text-transform: none; }
 .quotation-items-table td { padding: 9px 8px; border-top: 1px solid #e5e8ef; vertical-align: middle; }
 .quotation-items-table td small { display: block; color: #6b7588; margin-top: 2px; }
 .quotation-items-table tbody tr:hover { background: #fafbff; }
+.quotation-value-summary-grid { padding: 14px; display: grid; grid-template-columns: repeat(3, minmax(155px, 1fr)); gap: 10px 12px; }
+.quotation-value-summary-grid label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.quotation-value-summary-grid label > span { color: #35445f; font-size: 12px; font-weight: 700; }
+.quotation-value-summary-grid input { width: 100%; min-height: 38px; box-sizing: border-box; border: 1px solid #ccd4e2; border-radius: 7px; padding: 8px 9px; background: #f4f6f9; color: #172137; font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.quotation-value-summary-grid .quotation-value-total > span { color: #243879; }
+.quotation-value-summary-grid .quotation-value-total input { border-color: #aebfe4; background: #eef3ff; color: #183d88; font-weight: 800; }
+.quotation-amount-words { margin: 0 14px 14px; padding: 9px 11px; border: 1px solid #cdd6ed; border-radius: 8px; color: #5b6880; background: #f7f9ff; font-size: 11px; }
+.quotation-amount-words span, .quotation-amount-words strong { display: block; }
+.quotation-amount-words strong { margin-top: 3px; color: #243879; line-height: 1.4; }
 .quotation-development-cost-options { display: flex; flex-wrap: nowrap; gap: 8px; padding: 14px; }
 .quotation-development-cost-options label { min-width: 0; flex: 1 1 0; min-height: 40px; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid #ccd4e2; border-radius: 7px; color: #35445f; font-size: 12px; font-weight: 700; }
 .quotation-development-cost-options label.selected { border-color: #aebfe4; background: #eef3ff; color: #243879; }
@@ -48,6 +57,7 @@
 @media (max-width: 1100px) { .quotation-header-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
 @media (max-width: 760px) {
   .quotation-header-grid, .quotation-email-grid { grid-template-columns: 1fr; }
+  .quotation-value-summary-grid { grid-template-columns: 1fr; }
   .quotation-header-grid .span-2, .quotation-email-grid .span-2, .quotation-email-grid .span-full { grid-column: span 1; }
   .quotation-email-footer { align-items: stretch; flex-direction: column; }
 }

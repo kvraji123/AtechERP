@@ -6,6 +6,7 @@ import {
   CircleX,
   Cog,
   Gauge,
+  MapPin,
   PackageSearch,
   PackagePlus,
   Ruler,
@@ -151,6 +152,17 @@ export default function MastersPage() {
           onCreate={() => navigate("/masters/machines/new")}
           onManage={() => navigate("/masters/machines")}
         />
+        <MasterCard
+          title="Location Master"
+          description="Maintain approved physical locations such as work areas, machine zones, inspection rooms and gauge racks."
+          icon={<MapPin size={31} />}
+          onCreate={() => navigate("/masters/locations")}
+          onManage={() => navigate("/masters/locations")}
+        />
+        <MasterCard title="Department Master"
+          description="Maintain the internal department list used in purchase requests, machine units and other operational modules."
+          icon={<Building2 size={31} />} onCreate={() => navigate("/masters/departments")}
+          onManage={() => navigate("/masters/departments")}/>
         <MasterCard title="Operation Name Master"
           description="Maintain operation names, display order and default in-house or outsource source."
           icon={<Settings2 size={31}/>} onCreate={() => navigate("/masters/operations")}
@@ -163,6 +175,14 @@ export default function MastersPage() {
           description="Maintain inspection instruments and gauges available in Inspection Plans."
           icon={<Gauge size={31}/>} onCreate={() => navigate("/masters/instruments")}
           onManage={() => navigate("/masters/instruments")}/>
+        <MasterCard title="Inspection Characteristic LOV"
+          description="Maintain the characteristics available for selection in an Inspection Plan."
+          icon={<Ruler size={31}/>} onCreate={() => navigate("/masters/inspection-characteristics")}
+          onManage={() => navigate("/masters/inspection-characteristics")}/>
+        <MasterCard title="Inspection Frequency LOV"
+          description="Maintain inspection frequencies available for selection in an Inspection Plan."
+          icon={<Settings2 size={31}/>} onCreate={() => navigate("/masters/inspection-frequencies")}
+          onManage={() => navigate("/masters/inspection-frequencies")}/>
         <MasterCard title="Rejection Reason Master"
           description="Maintain standard quality rejection reasons, applicable receipt types and required supporting details."
           icon={<CircleX size={31}/>} onCreate={() => navigate("/masters/rejection-reasons")}

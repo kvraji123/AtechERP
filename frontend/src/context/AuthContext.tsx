@@ -1,80 +1,107 @@
 import {
   createContext,
+  useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 
+import { api, apiMessage } from "../api/client";
 import type { User } from "../types";
-import { Permissions } from "../utils/permissions";
+import LoginPage from "../pages/LoginPage";
 
-const configuredPermissions = String(
-  import.meta.env.VITE_USER_PERMISSIONS || ""
-)
-  .split(",")
-  .map((permission) => permission.trim().toUpperCase())
-  .filter(Boolean);
+const menus: User["menus"] = [
+  { menuCode: "DASH", menuName: "Dashboard", route: "/dashboard", icon: "dashboard", displayOrder: 1, canView: true },
+  { menuCode: "MKT", menuName: "Marketing", route: "/marketing", icon: "marketing", displayOrder: 2, canView: true },
+  { menuCode: "MST", menuName: "Masters", route: "/masters/customers", icon: "masters", displayOrder: 3, canView: true },
+  { menuCode: "RPT", menuName: "Reports", route: "/reports", icon: "reports", displayOrder: 4, canView: true },
+];
 
-const user: User = {
-  empCode: import.meta.env.VITE_USER_CODE || "EM7778",
-  empName: "System Administrator",
-  roleName: "Administrator",
-  permissions:
-    configuredPermissions.length > 0
-      ? configuredPermissions
-      : [Permissions.editEnquiryAllStages],
-  menus: [
-    {
-      menuCode: "DASH",
-      menuName: "Dashboard",
-      route: "/dashboard",
-      icon: "dashboard",
-      displayOrder: 1,
-      canView: true,
-    },
-    {
-      menuCode: "MKT",
-      menuName: "Marketing",
-      route: "/marketing",
-      icon: "marketing",
-      displayOrder: 2,
-      canView: true,
-    },
-    {
-      menuCode: "MST",
-      menuName: "Masters",
-      route: "/masters/customers",
-      icon: "masters",
-      displayOrder: 3,
-      canView: true,
-    },
-    {
-      menuCode: "RPT",
-      menuName: "Reports",
-      route: "/reports",
-      icon: "reports",
-      displayOrder: 4,
-      canView: true,
-    },
-  ],
+type Identity = {
+  userCode?: string;
+  employeeName?: string;
+  role?: string;
+  permissions?: string[];
 };
 
-const AuthContext = createContext({
-  user,
-  logout: () => {},
+function toUser(identity: Identity): User {
+  return {
+    empCode: String(identity.userCode || ""),
+    empName: String(identity.employeeName || identity.userCode || ""),
+    roleName: String(identity.role || ""),
+    permissions: Array.isArray(identity.permissions) ? identity.permissions : [],
+    menus,
+  };
+}
+
+type AuthContextValue = {
+  user: User | null;
+  login: (username: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue>({
+  user: null,
+  login: async () => {},
+  logout: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const value = useMemo(
-    () => ({ user, logout: () => location.reload() }),
-    []
-  );
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  useEffect(() => {
+    let current = true;
+    api.get("/auth/me")
+      .then((response) => {
+        const identity = response.data?.data;
+        if (!identity?.userCode || !identity?.role) {
+          throw new Error("The login session returned an incomplete user profile.");
+        }
+        if (current) setUser(toUser(identity));
+      })
+      .catch((error) => {
+        const status = error?.response?.status;
+        if (current && status !== 401) setSessionError(apiMessage(error));
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => { current = false; };
+  }, []);
+
+  const login = useCallback(async (username: string, password: string) => {
+    const response = await api.post("/auth/login", { username, password });
+    const identity = response.data?.data;
+    if (!identity?.userCode || !identity?.role) {
+      throw new Error("The login response did not include a valid user profile.");
+    }
+    setSessionError("");
+    setUser(toUser(identity));
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post("/auth/logout");
+    } finally {
+      setUser(null);
+    }
+  }, []);
+
+  const value = useMemo(() => ({ user, login, logout }), [user, login, logout]);
+
+  if (loading) {
+    return <main role="status" aria-live="polite" style={{ padding: 32 }}>Checking sign-in…</main>;
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={login} startupError={sessionError} />;
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => useContext(AuthContext);

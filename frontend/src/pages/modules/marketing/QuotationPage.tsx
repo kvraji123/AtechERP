@@ -14,12 +14,21 @@ import StageTabs, { type MarketingStage } from "../../../components/StageTabs";
 import { useAuth } from "../../../context/AuthContext";
 import { hasPermission, Permissions } from "../../../utils/permissions";
 import { todayInAppTimeZone } from "../../../utils/formatDateTime";
+import { amountInWords } from "../../../utils/amountInWords";
 
 const today = todayInAppTimeZone;
 const formatAmount = (value: unknown) => Number(value || 0).toLocaleString("en-IN", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const sampleCostInSelectedCurrency = (part: any) => {
+  const sampleCostInr = Number(part.sample_cost_inr || 0);
+  const fobPriceInr = Number(part.final_part_price_fob_inr || 0);
+  const fobPriceForeign = Number(part.final_part_price_fob_foreign || 0);
+  return fobPriceInr > 0
+    ? sampleCostInr * fobPriceForeign / fobPriceInr
+    : 0;
+};
 const developmentCostFields = [
   { key: "pattern_development_cost_foreign", costType: "PATTERN", label: "Pattern Cost" },
   { key: "fixture_development_cost_foreign", costType: "FIXTURE", label: "Fixture Cost" },
@@ -30,7 +39,7 @@ const developmentCostFields = [
 const quotationPdfUrl = (filePath?: string) => {
   if (!filePath) return "";
   if (/^https?:\/\//i.test(filePath)) return filePath;
-  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:4100/api/v1";
+  const apiBase = import.meta.env.VITE_API_BASE_URL || "/api/v1";
   return `${apiBase.replace(/\/api\/v1\/?$/, "")}${filePath}`;
 };
 
@@ -127,6 +136,12 @@ export default function QuotationPage() {
     (total, field) => total + developmentCostSummary[field.key],
     0
   );
+  const quotationItemTotal = selectedParts.reduce((total, part) => {
+    const quantity = Number(part.annual_quantity ?? part.required_quantity ?? 0);
+    return total + quantity * Number(part.final_part_price_fob_foreign || 0);
+  }, 0);
+  const quotationTotal = quotationItemTotal + selectedDevelopmentCostTotal;
+  const quotationCurrency = form.currencyCode || "INR";
 
   const togglePart = (id: number) => {
     if (finalized) return;
@@ -219,11 +234,26 @@ export default function QuotationPage() {
     }, 900);
   };
 
-  const showMailOption = () => {
+  /*const showMailOption = () => {
     setMessage({
       type: "success",
       text: "Mail sending is kept as a UI option only. Email integration will be added later.",
-    });
+    });*/
+  const sendEmail = async () => {
+    try {
+      setWorking("EMAIL"); setMessage(undefined);
+      const response = await marketingApi.sendQuotationEmail(enquiryId, {
+        to: form.emailTo,
+        subject: form.emailSubject,
+        body: form.emailBody,
+      });
+      setMessage({ type: "success", text: response.message });
+      await load();
+    }
+    catch (error) { setMessage({ type: "error", text: apiMessage(error) }); }
+    finally { setWorking(null); }
+
+
   };
 
   const cancel = () => {
@@ -231,8 +261,7 @@ export default function QuotationPage() {
   };
 
   return <div className="page-container quotation-page">
-    <PageHeader eyebrow="MARKETING / QUOTATION" title={quotation ? `Quotation - ${quotation.quotation_no}` : "New Quotation"} actions={<>
-      <button type="button" className="quotation-cancel" onClick={cancel}><X size={16}/>Cancel</button>
+    <PageHeader eyebrow="MARKETING / QUOTATION" title={quotation ? `Quotation - ${quotation.quotation_no}` : "New Quotation"} onClose={cancel} closeDisabled={working !== null} closeLabel="Close Quotation" actions={<>
       {(savedDraft || persistedFinalized) && !draftEditing && canEditAllStages ? (
         <button type="button" className="primary-action-button" disabled={working !== null} onClick={() => setDraftEditing(true)}><Pencil size={17}/>{persistedFinalized ? "Edit Quotation" : "Edit Draft"}</button>
       ) : !viewRequested && (!persistedFinalized || draftEditing) ? <>
@@ -252,7 +281,7 @@ export default function QuotationPage() {
       <div className="quotation-section-title"><h2>Quotation Details</h2>{quotation && <span className={`quotation-status ${quotation.quotation_status.toLowerCase()}`}>{quotation.quotation_status}</span>}</div>
       <div className="quotation-header-grid">
         <label><span>Quotation Number</span><input value={quotation?.quotation_no || "Auto Generated"} readOnly/></label>
-        <label><span>Quotation Date *</span><DateInput type="date" value={form.quotationDate} disabled={finalized} onChange={(event) => set("quotationDate", event.target.value)}/></label>
+        <label><span>Quotation Date *</span><DateInput type="date" value={form.quotationDate} max={today()} disabled={finalized} onChange={(event) => set("quotationDate", event.target.value)}/></label>
         <label><span>Enquiry Reference / Quote For</span><input value={enquiry?.doc_no || ""} readOnly/></label>
         <label><span>Customer Reference</span><input value={enquiry?.po_reference || "Not Available"} readOnly/></label>
         <label><span>Customer Name</span><input value={enquiry?.customer_name_snapshot || ""} readOnly/></label>
@@ -267,10 +296,12 @@ export default function QuotationPage() {
 
     <section className="quotation-card">
       <div className="quotation-section-title"><div><h2>Completed Workout Items</h2><p>Only FEASIBLE parts with COMPLETED Workout are included.</p></div><strong>{form.enquiryPartIds.length} / {parts.length} selected</strong></div>
-      <div className="quotation-table-wrap"><table className="quotation-items-table"><thead><tr><th>Select</th><th>Item Code</th><th>Drawing / Rev</th><th>Description</th><th>Required Qty</th><th>MOQ</th><th>Material</th><th>Weight Kg</th><th>FOB INR<small>(per part price)</small></th><th>FOB {form.currencyCode}<small>(per part price)</small></th><th>Development {form.currencyCode}</th><th>Sample Cost (INR)</th></tr></thead><tbody>
+      <div className="quotation-table-wrap"><table className="quotation-items-table" data-app-header-filter-disabled="true"><thead><tr><th>Select</th><th>Item Code</th><th>Drawing / Rev</th><th>Description</th><th>Required Qty</th><th>MOQ</th><th>Material</th><th>Weight Kg</th><th>FOB INR<small>(per part price)</small></th><th>FOB {form.currencyCode}<small>(per part price)</small></th><th>Line Total {form.currencyCode}</th><th>Development {form.currencyCode}</th><th>Sample Cost ({quotationCurrency})</th></tr></thead><tbody>
         {parts.map((part) => {
           const partId = Number(part.enquiry_part_id);
           const selected = form.enquiryPartIds.includes(partId);
+          const quantity = Number(part.annual_quantity ?? part.required_quantity ?? 0);
+          const lineTotal = quantity * Number(part.final_part_price_fob_foreign || 0);
           return <tr key={partId}>
               <td><input type="checkbox" checked={selected} disabled={finalized || persistedFinalized} onChange={() => togglePart(partId)}/></td>
               <td>{part.item_code || "-"}</td>
@@ -280,11 +311,22 @@ export default function QuotationPage() {
               <td>{part.moq}</td><td>{part.material_and_grade}</td><td>{part.weight_kg}</td>
               <td>{formatAmount(part.final_part_price_fob_inr)}</td>
               <td>{formatAmount(part.final_part_price_fob_foreign)}</td>
+              <td>{formatAmount(lineTotal)}<small>{amountInWords(lineTotal, quotationCurrency)}</small></td>
               <td>{formatAmount(part.total_development_cost_foreign)}</td>
-              <td>{formatAmount(part.sample_cost_inr)}</td>
+              <td>{formatAmount(sampleCostInSelectedCurrency(part))}</td>
           </tr>;
         })}
       </tbody></table></div>
+    </section>
+
+    <section className="quotation-card quotation-value-summary">
+      <div className="quotation-section-title"><h2>Quotation Value</h2><strong>{quotationCurrency}</strong></div>
+      <div className="quotation-value-summary-grid">
+        <label><span>Quoted Items Total</span><input value={formatAmount(quotationItemTotal)} readOnly /></label>
+        <label><span>Included Development Cost</span><input value={formatAmount(selectedDevelopmentCostTotal)} readOnly /></label>
+        <label className="quotation-value-total"><span>Quotation Total</span><input value={formatAmount(quotationTotal)} readOnly /></label>
+      </div>
+      <p className="quotation-amount-words"><span>Amount in words</span><strong>{amountInWords(quotationTotal, quotationCurrency)}</strong></p>
     </section>
 
     {availableDevelopmentCostFields.length > 0 && <section className="quotation-card quotation-development-summary">
@@ -316,9 +358,10 @@ export default function QuotationPage() {
     </section>
 
     {persistedFinalized && <section className="quotation-card quotation-email-card">
-      <div className="quotation-section-title"><div><h2>Email Quotation</h2><p>Mail sending option reserved for future integration.</p></div><span className="quotation-email-status not_sent">OPTION ONLY</span></div>
+      <div className="quotation-section-title"><div><h2>Email Quotation</h2><p>Send the generated quotation PDF to the customer.</p></div><span className={`quotation-email-status ${(quotation?.email_status || "NOT_SENT").toLowerCase()}`}>{quotation?.email_status || "NOT SENT"}</span></div>
       <div className="quotation-email-grid"><label><span>Recipient *</span><input type="email" value={form.emailTo} onChange={(event) => set("emailTo", event.target.value)}/></label><label className="span-2"><span>Subject</span><input value={form.emailSubject} onChange={(event) => set("emailSubject", event.target.value)}/></label><label className="span-full"><span>Mail Body</span><textarea rows={5} value={form.emailBody} onChange={(event) => set("emailBody", event.target.value)}/></label></div>
-      <div className="quotation-email-footer"><div><span>Actual mail will not be sent in the current phase.</span></div><button type="button" className="primary-action-button" onClick={showMailOption}><Mail size={17}/>Send Email</button></div>
+      <div className="quotation-email-footer"><div>{quotation?.email_failure_reason ? <span className="quotation-email-error">{quotation.email_failure_reason}</span> : <span>The generated quotation PDF will be attached automatically.</span>}</div><button type="button" className="primary-action-button" disabled={working !== null || !actions.includes("SEND_QUOTATION_EMAIL")} onClick={sendEmail}><Mail size={17}/>{working === "EMAIL" ? "Sending..." : "Send Email"}</button></div>
+
     </section>}
   </div>;
 }

@@ -17,6 +17,24 @@ export type StoredAttachment = {
 const path = (entityType: string, entityId: number | string) =>
   `/attachments/${encodeURIComponent(entityType)}/${encodeURIComponent(String(entityId))}`;
 
+/**
+ * Attachment APIs store upload paths relative to the API server (for example,
+ * `/uploads/marketing/...`).  The web app and API use different ports in
+ * local development and in the current production deployment, so a relative
+ * link would otherwise be opened against the frontend server and result in a
+ * 404.  Resolve only relative upload paths against the configured API origin.
+ */
+export function attachmentFileUrl(fileUrl: string | null | undefined) {
+  const value = String(fileUrl || "").trim();
+  if (!value || /^https?:\/\//i.test(value)) return value;
+
+  try {
+    return new URL(value, api.defaults.baseURL).toString();
+  } catch {
+    return value;
+  }
+}
+
 export const attachmentApi = {
   list: (entityType: string, entityId: number | string) =>
     api.get(path(entityType, entityId)).then((response) => response.data),

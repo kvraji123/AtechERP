@@ -25,9 +25,12 @@ npm run build
 ## API
 Update `.env`:
 ```env
-VITE_API_BASE_URL=http://localhost:4100/api/v1
-VITE_USER_CODE=EM7778
+VITE_API_BASE_URL=/api/v1
 ```
+
+The application displays its sign-in page until the backend has created a valid
+server-side session. Set up the initial Administrator and optional Standard User
+accounts in the backend `.env` before the first server start.
 
 ## Notes
 Customer and Part Master list/form API wiring is partly placeholder-based in the supplied source. Marketing screens are connected through `src/api/marketing.api.ts`.

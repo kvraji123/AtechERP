@@ -1,7 +1,7 @@
 /* Page-specific stylesheet. Shared layout and control rules are maintained in src/styles/index.css. */
 
 .marketing-actions-column {
-  width: 96px;
+  width: 132px;
   text-align: center;
   white-space: nowrap;
 }
@@ -280,22 +280,6 @@
 .marketing-column-filter-trigger:focus-visible {
   outline: 2px solid #b8322a;
   outline-offset: 1px;
-}
-
-.marketing-column-filter-count {
-  position: absolute;
-  top: -5px;
-  right: -6px;
-  display: grid;
-  place-items: center;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  color: #fff;
-  border-radius: 99px;
-  background: #b8322a;
-  font-size: 8px;
-  line-height: 1;
 }
 
 .marketing-column-filter-popover {

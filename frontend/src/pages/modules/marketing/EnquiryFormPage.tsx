@@ -9,7 +9,9 @@ import {
 
 import {
   ArrowLeft,
+  ExternalLink,
   History,
+  Paperclip,
   Pencil,
   Plus,
   Save,
@@ -25,6 +27,11 @@ import {
 } from "react-router-dom";
 
 import { apiMessage } from "../../../api/client";
+import {
+  attachmentApi,
+  attachmentFileUrl,
+  type StoredAttachment,
+} from "../../../api/attachment.api";
 import { customerApi } from "../../../api/customer.api";
 import { marketingApi } from "../../../api/marketing.api";
 import { partApi } from "../../../api/part.api";
@@ -35,6 +42,7 @@ import StageTabs from "../../../components/StageTabs";
 import { useReferenceData } from "../../../hooks/useReferenceData";
 import { useAuth } from "../../../context/AuthContext";
 import { hasPermission, Permissions } from "../../../utils/permissions";
+import { todayInAppTimeZone } from "../../../utils/formatDateTime";
 
 type MessageState = {
   type: "error" | "success";
@@ -68,11 +76,11 @@ type EnquiryPartForm = {
   drawingRevisionDate: string;
   productDescription: string;
   materialAndGrade: string;
-  alternativeMaterial: string;
   isAssembledPart: boolean;
   annualQuantity: string;
   moq: string;
   unitOfMeasurement: string;
+  drawingAttachments?: StoredAttachment[];
 };
 
 type PartOption = {
@@ -91,9 +99,12 @@ type PartOption = {
 
 type EnquiryFormState = {
   customerId: string;
+  customerRepresentativeName: string;
   enquiryMode: string;
   orderType: string;
   requiredDate: string;
+  customerEnquiryReference: string;
+  customerEnquiryDate: string;
   remarks: string;
   parts: EnquiryPartForm[];
 };
@@ -103,7 +114,7 @@ type EnquiryRevision = {
   revisionSequence: number;
   revisionNumber: string;
   revisionDate: string;
-  revisionAction: "CREATED" | "UPDATED" | "SUBMITTED" | "MIGRATED";
+  revisionAction: string;
   saveStatus: "DRAFT" | "SUBMITTED";
   createdBy: string;
   createdOn: string;
@@ -117,19 +128,23 @@ const createBlankPart = (): EnquiryPartForm => ({
   drawingRevisionNumber: "",
   drawingRevisionDate: "",
   productDescription: "",
-  materialAndGrade: "MS",
-  alternativeMaterial: "",
+  materialAndGrade: "",
   isAssembledPart: false,
   annualQuantity: "",
   moq: "",
   unitOfMeasurement: "Nos",
 });
 
+const today = todayInAppTimeZone;
+
 const createInitialForm = (): EnquiryFormState => ({
   customerId: "",
-  enquiryMode: "",
-  orderType: "",
+  customerRepresentativeName: "",
+  enquiryMode: "MAIL",
+  orderType: "SALES",
   requiredDate: "",
+  customerEnquiryReference: "",
+  customerEnquiryDate: "",
   remarks: "",
   parts: [createBlankPart()],
 });
@@ -226,6 +241,12 @@ export default function EnquiryFormPage() {
   const [partsLoading, setPartsLoading] =
     useState(false);
 
+  const [uploadingDrawingPartId, setUploadingDrawingPartId] =
+    useState<number | null>(null);
+
+  const [pendingDrawingFiles, setPendingDrawingFiles] =
+    useState<Record<number, File[]>>({});
+
   const firstEnquiryPartId =
     form.parts.find(
       (part) =>
@@ -308,6 +329,26 @@ export default function EnquiryFormPage() {
   }, [form.customerId]);
 
   useEffect(() => {
+    if (enquiryId) return;
+    const modes = referenceData.options("ENQUIRY_MODE");
+    const orderTypes = referenceData.options("ORDER_TYPE");
+    if (!modes.length && !orderTypes.length) return;
+    const defaultMode = modes.some((option) => option.value === "MAIL") ? "MAIL" : modes[0]?.value || "MAIL";
+    const defaultOrderType = orderTypes.some((option) => option.value === "SALES") ? "SALES" : orderTypes[0]?.value || "SALES";
+    setForm((current) => {
+      const enquiryMode = !modes.length || modes.some((option) => option.value === current.enquiryMode)
+        ? current.enquiryMode
+        : defaultMode;
+      const orderType = !orderTypes.length || orderTypes.some((option) => option.value === current.orderType)
+        ? current.orderType
+        : defaultOrderType;
+      return enquiryMode === current.enquiryMode && orderType === current.orderType
+        ? current
+        : { ...current, enquiryMode, orderType };
+    });
+  }, [enquiryId, referenceData.references]);
+
+  useEffect(() => {
     if (!enquiryId) {
       setForm(createInitialForm());
       setEnquiryStatus("IN_PROGRESS");
@@ -347,10 +388,7 @@ export default function EnquiryFormPage() {
             data.saveStatus ??
             "DRAFT") as "DRAFT" | "SUBMITTED"
         );
-        setDraftEditing(
-          (data.save_status ?? data.saveStatus) === "DRAFT" &&
-            editRequested
-        );
+        setDraftEditing(editRequested);
 
         const parts =
           Array.isArray(data.parts) &&
@@ -403,11 +441,6 @@ export default function EnquiryFormPage() {
                   materialAndGrade:
                     part.material_and_grade ??
                     part.materialAndGrade ??
-                    "MS",
-
-                  alternativeMaterial:
-                    part.alternative_material ??
-                    part.alternativeMaterial ??
                     "",
 
                   isAssembledPart: Boolean(
@@ -433,6 +466,11 @@ export default function EnquiryFormPage() {
                     part.unitOfMeasurement ??
                     "Nos",
 
+                  drawingAttachments:
+                    Array.isArray(part.drawingAttachments)
+                      ? part.drawingAttachments
+                      : [],
+
                 })
               )
             : [createBlankPart()];
@@ -443,6 +481,11 @@ export default function EnquiryFormPage() {
               data.customerId ??
               ""
           ),
+
+          customerRepresentativeName:
+            data.customer_representative_name ??
+            data.customerRepresentativeName ??
+            "",
 
           enquiryMode:
             data.enquiry_mode ??
@@ -458,6 +501,17 @@ export default function EnquiryFormPage() {
             formatDateForInput(
               data.required_date ??
                 data.requiredDate
+            ),
+
+          customerEnquiryReference:
+            data.customer_enquiry_reference ??
+            data.customerEnquiryReference ??
+            "",
+
+          customerEnquiryDate:
+            formatDateForInput(
+              data.customer_enquiry_date ??
+                data.customerEnquiryDate
             ),
 
           remarks:
@@ -541,6 +595,110 @@ export default function EnquiryFormPage() {
         partIndex === index ? { ...part, ...changes } : part
       ),
     }));
+  };
+
+  const uploadDrawingAttachment = async (index: number, file: File) => {
+    const part = form.parts[index];
+    const enquiryPartId = Number(part?.enquiry_part_id || 0);
+    if (!enquiryPartId) {
+      setMessage({ type: "error", text: "Save the enquiry draft before attaching a drawing." });
+      return;
+    }
+
+    try {
+      setUploadingDrawingPartId(enquiryPartId);
+      setMessage(null);
+      const response = await attachmentApi.upload("ENQUIRY_PART", enquiryPartId, file, {
+        attachmentType: "DRAWING",
+        attachmentName: part.drawingNumber.trim() || file.name,
+      });
+      const attachment = (response?.data?.data ?? response?.data ?? response) as StoredAttachment;
+      setForm((current) => ({
+        ...current,
+        parts: current.parts.map((currentPart, partIndex) => partIndex === index
+          ? { ...currentPart, drawingAttachments: [...(currentPart.drawingAttachments || []), attachment] }
+          : currentPart),
+      }));
+      setMessage({ type: "success", text: "Drawing attached successfully." });
+    } catch (error) {
+      setMessage({ type: "error", text: apiMessage(error) });
+    } finally {
+      setUploadingDrawingPartId(null);
+    }
+  };
+
+  const selectDrawingAttachments = (index: number, files: File[]) => {
+    if (!files.length) return;
+
+    if (Number(form.parts[index]?.enquiry_part_id || 0)) {
+      void (async () => {
+        for (const file of files) {
+          await uploadDrawingAttachment(index, file);
+        }
+      })();
+      return;
+    }
+
+    setPendingDrawingFiles((current) => ({
+      ...current,
+      [index]: [...(current[index] || []), ...files],
+    }));
+    setMessage({
+      type: "success",
+      text: `${files.length} drawing${files.length === 1 ? "" : "s"} selected. ${files.length === 1 ? "It will" : "They will"} be attached when the enquiry is saved.`,
+    });
+  };
+
+  const uploadPendingDrawingAttachments = async (savedParts: any[]) => {
+    for (const [indexText, files] of Object.entries(pendingDrawingFiles)) {
+      const index = Number(indexText);
+      const savedPart = savedParts[index] || {};
+      const enquiryPartId = Number(savedPart.enquiry_part_id ?? savedPart.enquiryPartId ?? 0);
+      if (!enquiryPartId) throw new Error(`The drawing for Part ${index + 1} could not be attached.`);
+
+      for (const file of files) {
+        const response = await attachmentApi.upload("ENQUIRY_PART", enquiryPartId, file, {
+          attachmentType: "DRAWING",
+          attachmentName: form.parts[index]?.drawingNumber.trim() || file.name,
+        });
+        const attachment = (response?.data?.data ?? response?.data ?? response) as StoredAttachment;
+        setForm((current) => ({
+          ...current,
+          parts: current.parts.map((part, partIndex) => partIndex === index
+            ? { ...part, enquiry_part_id: enquiryPartId, drawingAttachments: [...(part.drawingAttachments || []), attachment] }
+            : part),
+        }));
+        setPendingDrawingFiles((current) => {
+          const remaining = (current[index] || []).filter((pendingFile) => pendingFile !== file);
+          const next = { ...current };
+          if (remaining.length) next[index] = remaining;
+          else delete next[index];
+          return next;
+        });
+      }
+    }
+  };
+
+  const removeDrawingAttachment = async (index: number, attachment: StoredAttachment) => {
+    const enquiryPartId = Number(form.parts[index]?.enquiry_part_id || 0);
+    if (!enquiryPartId) return;
+
+    try {
+      setUploadingDrawingPartId(enquiryPartId);
+      setMessage(null);
+      await attachmentApi.remove("ENQUIRY_PART", enquiryPartId, attachment.attachmentId);
+      setForm((current) => ({
+        ...current,
+        parts: current.parts.map((part, partIndex) => partIndex === index
+          ? { ...part, drawingAttachments: (part.drawingAttachments || []).filter((entry) => entry.attachmentId !== attachment.attachmentId) }
+          : part),
+      }));
+      setMessage({ type: "success", text: "Drawing attachment removed." });
+    } catch (error) {
+      setMessage({ type: "error", text: apiMessage(error) });
+    } finally {
+      setUploadingDrawingPartId(null);
+    }
   };
 
   const selectMasterPart = (
@@ -630,6 +788,15 @@ export default function EnquiryFormPage() {
       confirmLabel: "Delete part",
     });
     if (!confirmed) return;
+
+    setPendingDrawingFiles((current) => {
+      const next: Record<number, File[]> = {};
+      Object.entries(current).forEach(([partIndexText, files]) => {
+        const partIndex = Number(partIndexText);
+        if (partIndex !== index) next[partIndex > index ? partIndex - 1 : partIndex] = files;
+      });
+      return next;
+    });
 
     changeField(
       "parts",
@@ -727,19 +894,6 @@ export default function EnquiryFormPage() {
         return false;
       }
 
-      if (
-        !part.materialAndGrade.trim()
-      ) {
-        setMessage({
-          type: "error",
-          text: `Material and Grade is required for Part ${
-            index + 1
-          }.`,
-        });
-
-        return false;
-      }
-
     }
 
     return true;
@@ -752,6 +906,9 @@ export default function EnquiryFormPage() {
       ? Number(form.customerId)
       : null,
 
+    customerRepresentativeName:
+      form.customerRepresentativeName.trim() || null,
+
     enquiryMode:
       form.enquiryMode || null,
 
@@ -760,6 +917,12 @@ export default function EnquiryFormPage() {
 
     requiredDate:
       form.requiredDate || null,
+
+    customerEnquiryReference:
+      form.customerEnquiryReference.trim() || null,
+
+    customerEnquiryDate:
+      form.customerEnquiryDate || null,
 
     remarks:
       form.remarks.trim() || null,
@@ -796,11 +959,7 @@ export default function EnquiryFormPage() {
           part.productDescription.trim(),
 
         materialAndGrade:
-          part.materialAndGrade.trim(),
-
-        alternativeMaterial:
-          part.alternativeMaterial.trim() ||
-          null,
+          part.materialAndGrade.trim() || null,
 
         isAssembledPart:
           part.isAssembledPart,
@@ -826,7 +985,10 @@ export default function EnquiryFormPage() {
   const save = async (
     action: "DRAFT" | "SUBMIT", stayOnPage = false
   ): Promise<boolean | void> => {
-    const savedSnapshot = unsaved.snapshot();
+    if (uploadingDrawingPartId) {
+      setMessage({ type: "error", text: "Wait for the drawing attachment to finish before saving the enquiry." });
+      return;
+    }
 
     if (!validate(action)) {
       return;
@@ -865,6 +1027,17 @@ export default function EnquiryFormPage() {
         responseData.enquiryParts ??
         [];
 
+      setForm((current) => ({
+        ...current,
+        parts: current.parts.map((part, index) => {
+          const responsePart = responseParts[index] || {};
+          const enquiryPartId = Number(responsePart.enquiry_part_id ?? responsePart.enquiryPartId ?? 0);
+          return enquiryPartId ? { ...part, enquiry_part_id: enquiryPartId } : part;
+        }),
+      }));
+
+      await uploadPendingDrawingAttachments(responseParts);
+
       const savedPartId = Number(
         responseParts?.[0]
           ?.enquiry_part_id ??
@@ -884,11 +1057,16 @@ export default function EnquiryFormPage() {
             : enquiryStatus)) as EnquiryStatus
       );
       setRecordSaveStatus(
-        action === "SUBMIT"
-          ? "SUBMITTED"
-          : "DRAFT"
+        (responseData.save_status ??
+          responseData.saveStatus ??
+          (action === "SUBMIT" ? "SUBMITTED" : recordSaveStatus)) as "DRAFT" | "SUBMITTED"
       );
-unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
+      // Saving can hydrate the form with server-generated part IDs and
+      // attachment metadata. Acknowledge the form as it exists now, rather
+      // than the pre-save snapshot, so that this internal update is not
+      // treated as a user edit when moving to Feasibility.
+      unsaved.markSaved();
+      setDraftEditing(action === "DRAFT");
 
       showSuccess(
         response?.message ??
@@ -898,10 +1076,18 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
             : "Enquiry submitted successfully.")
       );
 
+      // A newly created draft must immediately move to its ID-based route.
+      // This makes every later draft save use PUT /:enquiryId instead of
+      // creating another enquiry and consuming another document number.
+      if (action === "DRAFT" && !enquiryId && savedEnquiryId > 0) {
+        navigate(`/marketing/enquiries/${savedEnquiryId}?mode=edit`, {
+          replace: true,
+        });
+      }
+
       if (stayOnPage) return true;
       if (action === "DRAFT") {
-        navigate("/marketing/enquiries");
-
+        // Keep the draft open after saving so the user can continue editing it.
         return;
       }
 
@@ -937,10 +1123,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
     }
   };
 
-  const formLocked =
-    Boolean(enquiryId) &&
-    (recordSaveStatus === "SUBMITTED" ||
-      !draftEditing);
+  const formLocked = savingAction !== null || (Boolean(enquiryId) && !draftEditing);
 
   const openRevisionHistory = async () => {
     if (!enquiryId) {
@@ -1048,10 +1231,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
             </button>
           )}
 
-          {Boolean(enquiryId) &&
-          recordSaveStatus === "DRAFT" &&
-          !draftEditing &&
-          canEditAllStages ? (
+          {Boolean(enquiryId) && !draftEditing && canEditAllStages ? (
             <button
               type="button"
               className="enquiry-submit-button"
@@ -1059,9 +1239,9 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
               onClick={() => setDraftEditing(true)}
             >
               <Pencil size={16} />
-              Edit Draft
+              {recordSaveStatus === "SUBMITTED" ? "Edit Enquiry" : "Edit Draft"}
             </button>
-          ) : recordSaveStatus === "DRAFT" ? (
+          ) : draftEditing ? (
             <>
               {Boolean(enquiryId) && (
                 <button
@@ -1083,21 +1263,38 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
                 <Save size={16} />
                 {savingAction === "DRAFT"
                   ? "Saving..."
-                  : "Save Draft"}
+                  : recordSaveStatus === "SUBMITTED"
+                    ? "Save Changes"
+                    : "Save Draft"}
               </button>
-              <button
-                type="button"
-                className="enquiry-submit-button"
-                disabled={loading || savingAction !== null}
-                onClick={() => save("SUBMIT")}
-              >
-                <Send size={16} />
-                {savingAction === "SUBMIT"
-                  ? "Submitting..."
-                  : "Submit & Continue"}
-              </button>
+              {recordSaveStatus === "DRAFT" && (
+                <button
+                  type="button"
+                  className="enquiry-submit-button"
+                  disabled={loading || savingAction !== null}
+                  onClick={() => save("SUBMIT")}
+                >
+                  <Send size={16} />
+                  {savingAction === "SUBMIT"
+                    ? "Submitting..."
+                    : "Submit & Continue"}
+                </button>
+              )}
             </>
           ) : null}
+
+          <button
+            type="button"
+            className="enquiry-close-button"
+            aria-label="Close enquiry"
+            title="Close enquiry"
+            disabled={loading || savingAction !== null}
+            onClick={() =>
+              unsaved.requestLeave(() => navigate("/marketing/enquiries"))
+            }
+          >
+            <X size={18} />
+          </button>
         </div>
       </header>
 
@@ -1161,6 +1358,23 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
           </label>
 
           <label className="enquiry-field">
+            <span>Customer Representative Name</span>
+
+            <input
+              type="text"
+              maxLength={150}
+              value={form.customerRepresentativeName}
+              disabled={loading || formLocked}
+              onChange={(event) =>
+                changeField(
+                  "customerRepresentativeName",
+                  event.target.value
+                )
+              }
+            />
+          </label>
+
+          <label className="enquiry-field">
             <span>Enquiry Mode *</span>
 
             <select
@@ -1208,6 +1422,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
             <DateInput
               type="date"
               value={form.requiredDate}
+              min={today()}
               disabled={loading || formLocked}
               onChange={(event) =>
                 changeField(
@@ -1243,7 +1458,41 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
             )}
           </label>
 
-          <label className="enquiry-field enquiry-span-full">
+          <label className="enquiry-field">
+            <span>Customer Enquiry / Request No.</span>
+
+            <input
+              type="text"
+              maxLength={100}
+              value={form.customerEnquiryReference}
+              disabled={loading || formLocked}
+              onChange={(event) =>
+                changeField(
+                  "customerEnquiryReference",
+                  event.target.value
+                )
+              }
+            />
+          </label>
+
+          <label className="enquiry-field">
+            <span>Customer Enquiry / Request Date</span>
+
+            <DateInput
+              type="date"
+              value={form.customerEnquiryDate}
+              max={today()}
+              disabled={loading || formLocked}
+              onChange={(event) =>
+                changeField(
+                  "customerEnquiryDate",
+                  event.target.value
+                )
+              }
+            />
+          </label>
+
+          <label className="enquiry-field">
             <span>Remarks</span>
 
             <textarea
@@ -1277,6 +1526,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
             disabled={
               loading ||
               formLocked ||
+              recordSaveStatus === "SUBMITTED" ||
               savingAction !== null
             }
             onClick={addPart}
@@ -1312,6 +1562,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
                         1 ||
                       loading ||
                       formLocked ||
+                      recordSaveStatus === "SUBMITTED" ||
                       savingAction !== null
                     }
                     onClick={() =>
@@ -1344,23 +1595,36 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
                     />
                   </label>
 
-                  <label className="enquiry-field enquiry-span-2">
+                  <div className="enquiry-field enquiry-span-3">
                     <span>
                       Drawing Number *
                     </span>
 
-                    <input
-                      type="text"
-                      list={`drawing-options-${index}`}
-                      value={
-                        part.drawingNumber
-                      }
-                      disabled={loading || formLocked || partsLoading}
-                      onChange={(event) =>
-                        changeDrawingNumber(index, event.target.value)
-                      }
-                      onBlur={() => resolveDrawingNumber(index)}
-                    />
+                    <div className="enquiry-drawing-input-row">
+                      <input
+                        type="text"
+                        list={`drawing-options-${index}`}
+                        value={
+                          part.drawingNumber
+                        }
+                        disabled={loading || formLocked || partsLoading}
+                        onChange={(event) =>
+                          changeDrawingNumber(index, event.target.value)
+                        }
+                        onBlur={() => resolveDrawingNumber(index)}
+                      />
+                      {!formLocked && <label className={`enquiry-attach-drawing-button ${uploadingDrawingPartId === part.enquiry_part_id || savingAction !== null ? "disabled" : ""}`} title={part.enquiry_part_id ? "Attach one or more drawings" : "Select drawings to attach when the enquiry is saved"}>
+                        <Paperclip size={14}/><span>{uploadingDrawingPartId === part.enquiry_part_id ? "Attaching..." : "Attach drawings"}</span>
+                        <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.dwg,.dxf,.step,.stp" disabled={uploadingDrawingPartId === part.enquiry_part_id || savingAction !== null} onChange={(event) => { const files = Array.from(event.target.files || []); event.currentTarget.value = ""; selectDrawingAttachments(index, files); }}/>
+                      </label>}
+                      {!!pendingDrawingFiles[index]?.length && <div className="enquiry-pending-drawing">{pendingDrawingFiles[index].map((file) => <div key={`${file.name}-${file.lastModified}-${file.size}`}><Paperclip size={12}/><span title={file.name}>{file.name}</span><small>Will attach on save</small><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setPendingDrawingFiles((current) => { const remaining = (current[index] || []).filter((pendingFile) => pendingFile !== file); const next = { ...current }; if (remaining.length) next[index] = remaining; else delete next[index]; return next; })}><X size={12}/></button></div>)}</div>}
+                      {!!part.drawingAttachments?.length && <div className="enquiry-drawing-attachments">
+                        {part.drawingAttachments.map((attachment) => <div key={attachment.attachmentId}>
+                          <a href={attachmentFileUrl(attachment.fileUrl)} target="_blank" rel="noreferrer" title={attachment.fileName}><ExternalLink size={13}/><span>{attachment.fileName}</span></a>
+                          {!formLocked && <button type="button" aria-label={`Remove ${attachment.fileName}`} disabled={uploadingDrawingPartId === part.enquiry_part_id} onClick={() => void removeDrawingAttachment(index, attachment)}><X size={14}/></button>}
+                        </div>)}
+                      </div>}
+                    </div>
                     <datalist id={`drawing-options-${index}`}>
                       {partOptions.map((option) => (
                         <option
@@ -1381,6 +1645,28 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
                       <button type="button" disabled title="Part Master creation is disabled at the Enquiry stage."><Plus size={13}/>Add Part to Part Master</button>
                       <small>Create it separately from Masters after this stage.</small>
                     </div>}
+                  </div>
+
+                  <label className="enquiry-field enquiry-part-product-field">
+                    <span>
+                      Product Name or
+                      Description *
+                    </span>
+
+                    <input
+                      type="text"
+                      value={
+                        part.productDescription
+                      }
+                      disabled={loading || formLocked || Boolean(part.partId)}
+                      onChange={(event) =>
+                        changePart(
+                          index,
+                          "productDescription",
+                          event.target.value
+                        )
+                      }
+                    />
                   </label>
 
                   <label className="enquiry-field">
@@ -1407,70 +1693,6 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
 
                   <label className="enquiry-field">
                     <span>
-                      Product Name or
-                      Description *
-                    </span>
-
-                    <input
-                      type="text"
-                      value={
-                        part.productDescription
-                      }
-                      disabled={loading || formLocked || Boolean(part.partId)}
-                      onChange={(event) =>
-                        changePart(
-                          index,
-                          "productDescription",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label className="enquiry-field">
-                    <span>
-                      Material and Grade *
-                    </span>
-
-                    <input
-                      type="text"
-                      value={
-                        part.materialAndGrade
-                      }
-                      disabled={loading || formLocked || Boolean(part.partId)}
-                      onChange={(event) =>
-                        changePart(
-                          index,
-                          "materialAndGrade",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label className="enquiry-field">
-                    <span>
-                      Alternative Material
-                    </span>
-
-                    <input
-                      type="text"
-                      value={
-                        part.alternativeMaterial
-                      }
-                      disabled={loading || formLocked}
-                      onChange={(event) =>
-                        changePart(
-                          index,
-                          "alternativeMaterial",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label className="enquiry-field">
-                    <span>
                       Drawing Revision Date
                     </span>
 
@@ -1479,6 +1701,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
                       value={
                         part.drawingRevisionDate
                       }
+                      max={today()}
                       disabled={loading || formLocked || Boolean(part.partId)}
                       onChange={(event) =>
                         changePart(
@@ -1650,7 +1873,7 @@ unsaved.markSaved(savedSnapshot);       setDraftEditing(false);
                               </strong>
                             </td>
                             <td>{revision.revisionDate}</td>
-                            <td>{revision.revisionAction}</td>
+                            <td>{String(revision.revisionAction || "-").split("_").join(" ")}</td>
                             <td>{revision.saveStatus}</td>
                             <td>{revision.createdBy || "-"}</td>
                           </tr>

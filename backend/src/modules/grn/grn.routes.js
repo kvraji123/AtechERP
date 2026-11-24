@@ -7,6 +7,7 @@ const router = Router();
 router.get("/suppliers", requirePermission("GRN_POST"), asyncHandler(controller.listSupplierOptions));
 router.get("/", requirePermission("GRN_POST"), asyncHandler(controller.list));
 router.get("/summary", requirePermission("GRN_POST"), asyncHandler(controller.summary));
+router.get("/pending-po-receipts", requirePermission("GRN_POST"), asyncHandler(controller.pendingPoReceipts));
 router.get("/:id", requirePermission("GRN_POST"), asyncHandler(controller.get));
 router.get("/:id/rejections", requirePermission("GRN_POST"), asyncHandler(controller.listRejections));
 router.post("/:id/items/:grnItemId/rejection-attachments", requirePermission("GRN_POST"), (req,res,next) => { req.params.moduleName="grn-rejections"; uploadSingle(req,res,next); }, asyncHandler(controller.uploadRejectionAttachment));

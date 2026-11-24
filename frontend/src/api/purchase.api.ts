@@ -121,6 +121,8 @@ export const purchaseApi = {
     api.post("/purchase-requisitions", body).then((response) => response.data),
   updateRequisition: (id: string | number, body: PurchaseRequestPayload) =>
     api.put(`/purchase-requisitions/${id}`, body).then((response) => response.data),
+  deleteRequisition: (id: string | number) =>
+    api.delete(`/purchase-requisitions/${id}`).then((response) => response.data),
   listRequisitions: (params: Record<string, string | number> = {}) =>
     api.get("/purchase-requisitions", { params }).then((response) => response.data),
   purchaseRequisitionSummary: () =>
@@ -173,6 +175,8 @@ export const purchaseApi = {
     api.get("/purchase-grns", { params }).then((response) => response.data),
   grnSummary: () =>
     api.get("/purchase-grns/summary").then((response) => response.data),
+  listPendingPoReceipts: (params: Record<string, string | number> = {}) =>
+    api.get("/purchase-grns/pending-po-receipts", { params }).then((response) => response.data),
   listGrnSuppliers: () =>
     api.get("/purchase-grns/suppliers").then((response) => response.data),
   getGrn: (id: string | number) =>

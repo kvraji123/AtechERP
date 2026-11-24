@@ -5,11 +5,28 @@ import { recordAudit } from "../../shared/services/audit.service.js";
 import * as repository from "./gauge.repository.js";
 import { todayInAppTimeZone } from "../../utils/dateTime.js";
 import { listLocations, validateStorageLocation } from "../inventory/inventory-location.repository.js";
+import { completeCalibrationReturnGateEntry } from "../gate-entry/gate-entry.service.js";
 
 const operationalStatuses = ["AVAILABLE", "ISSUED", "COLLECTED_FOR_CALIBRATION", "UNDER_CALIBRATION", "UNDER_SERVICE", "REJECTED", "RETIRED"];
 const usableConditions = new Set(["ON_TIME", "DUE_SOON", "DUE_TODAY"]);
 const clean = (value) => value === null || value === undefined ? null : String(value).trim() || null;
 const today = todayInAppTimeZone;
+
+async function assertCalibrationAgencySupplier(connection, calibrationAgency) {
+  if (!calibrationAgency) return;
+  if (!(await repository.hasActiveCalibrationSupplier(connection, calibrationAgency))) {
+    throw new AppError("Select an active supplier categorized for Calibration as the Calibration Agency.");
+  }
+}
+
+async function resolveActiveIssueLocation(connection, tenantId, value) {
+  const requested = clean(value);
+  const location = (await listLocations(tenantId, connection)).find((entry) =>
+    String(entry.label || "").toLocaleUpperCase() === String(requested || "").toLocaleUpperCase()
+  );
+  if (!location) throw new AppError("Select an active Issue Location from Location Master.");
+  return location.label;
+}
 
 function validDate(value, label, required = false) {
   const normalized = clean(value);
@@ -49,11 +66,16 @@ function normalizeRegistration(data) {
   const currentLocation = clean(data.currentLocation);
   if (!currentLocation) throw new AppError("Current Location is required.");
   const serialNumbers = Array.isArray(data.serialNumbers) ? data.serialNumbers.map(clean) : [];
+  const manufacturerSerialNumberRange = clean(data.manufacturerSerialNumberRange);
+  if (manufacturerSerialNumberRange && manufacturerSerialNumberRange.length > 120) {
+    throw new AppError("Manufacturer Serial Number Range must be at most 120 characters.");
+  }
   return {
     sourceGrnItemId: positiveWhole(data.sourceGrnItemId, "Posted GRN item", 0, Number.MAX_SAFE_INTEGER),
     quantity: positiveWhole(data.quantity, "Quantity", 1),
     instrumentAbbreviation: normalizeAbbreviation(data.instrumentAbbreviation),
     manufacturerSerialNumbers: serialNumbers,
+    manufacturerSerialNumberRange,
     makeName: clean(data.makeName),
     modelNumber: clean(data.modelNumber),
     measurementRange: clean(data.measurementRange),
@@ -106,6 +128,34 @@ function normalizeBatchGaugeIds(value) {
   return uniqueIds.sort((left, right) => left - right);
 }
 
+function normalizeCalibrationReturnItems(value, returnDate) {
+  if (!Array.isArray(value) || value.length === 0) throw new AppError("Select at least one Gauge ID received from calibration.");
+  if (value.length > 100) throw new AppError("A Calibration Return GRN can include up to 100 Gauge IDs.");
+  const gaugeMasterIds = new Set();
+  return value.map((entry) => {
+    const gaugeMasterId = Number(entry?.gaugeMasterId);
+    if (!Number.isSafeInteger(gaugeMasterId) || gaugeMasterId < 1) throw new AppError("Select valid Gauge IDs for the Calibration Return GRN.");
+    if (gaugeMasterIds.has(gaugeMasterId)) throw new AppError("A Gauge ID can be received only once in the same Calibration Return GRN.");
+    gaugeMasterIds.add(gaugeMasterId);
+    const calibrationResult = String(entry?.calibrationResult || "").trim().toUpperCase();
+    if (!['PASS', 'FAIL'].includes(calibrationResult)) throw new AppError("Calibration Result must be Pass or Fail for every received Gauge ID.");
+    const certificateNumber = clean(entry?.certificateNumber);
+    const certificateFile = entry?.certificateFile && typeof entry.certificateFile === "object" ? entry.certificateFile : null;
+    if (!certificateNumber) throw new AppError("Certificate Number is required for every returned Gauge ID.");
+    if (!certificateFile?.fileName || !certificateFile?.filePath || !Number(certificateFile?.fileSizeBytes)) {
+      throw new AppError("Upload one certificate PDF for every returned Gauge ID.");
+    }
+    return {
+      gaugeMasterId,
+      calibrationResult,
+      calibrationDate: validDate(entry?.calibrationDate || returnDate, "Calibration Date", true),
+      certificateNumber,
+      certificateFile,
+      remarks: clean(entry?.remarks),
+    };
+  });
+}
+
 async function loadGaugeForUpdate(connection, gaugeMasterId, user) {
   const gauge = await repository.getGaugeById(Number(gaugeMasterId), user.tenantId, connection, true);
   if (!gauge) throw new AppError("Gauge Master record not found.", 404);
@@ -135,7 +185,10 @@ export async function getLookups(user) {
   return {
     storageLocations: await listLocations(user.tenantId),
     registrationSources: await repository.listGaugeRegistrationSources(user.tenantId),
-    operationalStatuses: operationalStatuses.map((value) => ({ value, label: value.toLowerCase().replace(/(^|_)\w/g, (text) => text.replace("_", " ").toUpperCase()) })),
+    operationalStatuses: [
+      { value: "CALIBRATION_EXPIRED", label: "Blocked - Calibration Expired" },
+      ...operationalStatuses.map((value) => ({ value, label: value.toLowerCase().replace(/(^|_)\w/g, (text) => text.replace("_", " ").toUpperCase()) })),
+    ],
     calibrationConditions: [
       { value: "ON_TIME", label: "On Time" }, { value: "DUE_SOON", label: "Due Soon" },
       { value: "DUE_TODAY", label: "Due Today" }, { value: "EXPIRED", label: "Expired" },
@@ -151,7 +204,20 @@ export function getCalibrationWorkflowSummary(user) {
 export async function list(query, user) {
   const page = Math.max(Number(query.page || 1), 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize || 20), 1), 100);
-  const result = await repository.listGauges({ tenantId: user.tenantId, search: query.search, operationalStatus: query.operationalStatus, calibrationCondition: query.calibrationCondition, limit: pageSize, offset: (page - 1) * pageSize });
+  const result = await repository.listGauges({
+    tenantId: user.tenantId,
+    search: query.search,
+    gaugeId: query.gaugeId,
+    instrument: query.instrument,
+    grnNumber: query.grnNumber,
+    calibrationDueDate: query.calibrationDueDate,
+    location: query.location,
+    operationalStatus: query.operationalStatus,
+    lifecycleStatus: query.lifecycleStatus,
+    calibrationCondition: query.calibrationCondition,
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+  });
   return { ...result, page, pageSize };
 }
 
@@ -172,53 +238,150 @@ export async function getCalibrationDispatch(calibrationDispatchId, user) {
   return dispatch;
 }
 
-export async function createCalibrationDispatch(raw, user) {
+export async function createCalibrationDispatchInTransaction(raw, user, connection, options = {}) {
   const gaugeMasterIds = normalizeBatchGaugeIds(raw.gaugeMasterIds);
-  const servicePurchaseOrderId = positiveWhole(raw.servicePurchaseOrderId, "Calibration service PO", 0, Number.MAX_SAFE_INTEGER);
+  const calibrationAgency = clean(raw.calibrationAgency);
   const dispatchDate = validDate(raw.dispatchDate || today(), "Dispatch Date", true);
   const expectedReturnDate = validDate(raw.expectedReturnDate, "Expected Return Date", true);
   const courierReference = clean(raw.courierReference);
+  const dispatchFrom = clean(raw.dispatchFrom);
   const remarks = clean(raw.remarks);
+  if (!calibrationAgency) throw new AppError("Calibration Agency is required.");
+  await assertCalibrationAgencySupplier(connection, calibrationAgency);
   if (expectedReturnDate < dispatchDate) throw new AppError("Expected Return Date cannot be before Dispatch Date.");
 
-  return withTransaction(async (connection) => {
-    const gauges = [];
-    for (const gaugeMasterId of gaugeMasterIds) gauges.push(await loadGaugeForUpdate(connection, gaugeMasterId, user));
-    for (const gauge of gauges) assertLifecycle(gauge, ["COLLECTED_FOR_CALIBRATION"]);
-    const agencies = [...new Set(gauges.map((gauge) => String(gauge.calibrationAgency || "").trim()).filter(Boolean).map((agency) => agency.toLocaleLowerCase()))];
-    if (agencies.length > 1) throw new AppError("Selected Gauge IDs must have the same Calibration Agency before creating one dispatch challan.", 409);
+  const gauges = [];
+  for (const gaugeMasterId of gaugeMasterIds) gauges.push(await loadGaugeForUpdate(connection, gaugeMasterId, user));
+  for (const gauge of gauges) assertLifecycle(gauge, ["COLLECTED_FOR_CALIBRATION"]);
+  const agencies = [...new Set(gauges.map((gauge) => String(gauge.calibrationAgency || "").trim()).filter(Boolean).map((agency) => agency.toLocaleLowerCase()))];
+  if (agencies.length > 1) throw new AppError("Selected Gauge IDs must have the same Calibration Agency before creating one dispatch challan.", 409);
 
-    const servicePurchaseOrder = await repository.getCalibrationServicePurchaseOrder(connection, user.tenantId, servicePurchaseOrderId);
-    if (!servicePurchaseOrder) throw new AppError("Select an approved calibration service PO.", 409);
-    const calibrationAgency = clean(servicePurchaseOrder.supplierName);
-    if (!calibrationAgency) throw new AppError("The selected service PO does not have a supplier.", 409);
-    if (agencies.length && agencies[0] !== calibrationAgency.toLocaleLowerCase()) {
-      throw new AppError(`The selected gauges are assigned to ${gauges[0].calibrationAgency}. Select a service PO for that calibration agency.`, 409);
-    }
+  if (agencies.length && agencies[0] !== calibrationAgency.toLocaleLowerCase()) {
+    throw new AppError(`The selected gauges are assigned to ${gauges[0].calibrationAgency}. Create the dispatch challan for that calibration agency.`, 409);
+  }
 
+  let challanNumber = options.challanNumber || null;
+  if (!challanNumber) {
     const financialYear = getFinancialYear(new Date(`${dispatchDate}T00:00:00`));
     await ensureDocumentSequence(connection, "GAUGE_CALIBRATION_DISPATCH", financialYear, "GCD");
-    const challanNumber = await getNextDocumentNumber(connection, "GAUGE_CALIBRATION_DISPATCH", financialYear);
-    const calibrationDispatchId = await repository.insertMovementBatch(connection, {
-      tenantId: user.tenantId, movementNumber: challanNumber, movementType: "CALIBRATION_DISPATCH", movementDate: dispatchDate,
-      calibrationAgency, servicePurchaseOrderId, servicePoNumber: servicePurchaseOrder.poNumber, challanNumber,
-      expectedReturnDate, courierReference, locationName: calibrationAgency, remarks, createdBy: user.userCode,
+    challanNumber = await getNextDocumentNumber(connection, "GAUGE_CALIBRATION_DISPATCH", financialYear);
+  }
+  const calibrationDispatchId = await repository.insertMovementBatch(connection, {
+    tenantId: user.tenantId, movementNumber: challanNumber, movementType: "CALIBRATION_DISPATCH", movementDate: dispatchDate,
+    calibrationAgency, servicePurchaseOrderId: null, servicePoNumber: null, challanNumber,
+    expectedReturnDate, courierReference, materialOutwardDocumentId: options.materialOutwardDocumentId || null,
+    locationName: dispatchFrom || calibrationAgency, remarks, createdBy: user.userCode,
+  });
+  for (const gauge of gauges) {
+    await repository.updateLifecycle(connection, gauge.gaugeMasterId, {
+      operationalStatus: "UNDER_CALIBRATION", currentLocation: calibrationAgency, assignedTo: null, calibrationAgency,
+    }, user.userCode);
+    await addHistory(connection, user, gauge.gaugeMasterId, "CALIBRATION_DISPATCHED", {
+      gaugeMovementBatchId: calibrationDispatchId, eventDate: dispatchDate, operationalStatus: "UNDER_CALIBRATION",
+      locationName: calibrationAgency, calibrationAgency, remarks,
     });
-    for (const gauge of gauges) {
+  }
+  await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_CALIBRATION_DISPATCH",
+    entityId: calibrationDispatchId, action: "CALIBRATION_DISPATCH_CREATED", newValue: {
+      challanNumber, calibrationAgency,
+      expectedReturnDate, courierReference, gaugeMasterIds, materialOutwardDocumentId: options.materialOutwardDocumentId || null,
+    }, performedBy: user.userCode });
+  return repository.getCalibrationDispatch(calibrationDispatchId, user.tenantId, connection);
+}
+
+export async function createCalibrationDispatch(raw, user) {
+  return withTransaction((connection) => createCalibrationDispatchInTransaction(raw, user, connection));
+}
+
+export async function createCalibrationReturnGrn(calibrationDispatchId, raw, user) {
+  const returnDate = validDate(raw.returnDate || today(), "Return Date", true);
+  const returnLocation = clean(raw.returnLocation);
+  const remarks = clean(raw.remarks);
+  const gateEntryId = Number(raw.gateEntryId);
+  if (!returnLocation) throw new AppError("Return or holding location is required.");
+  if (!Number.isSafeInteger(gateEntryId) || gateEntryId < 1) throw new AppError("Select the completed Calibration Return Gate Entry before creating this GRN.");
+  const items = normalizeCalibrationReturnItems(raw.items, returnDate);
+
+  return withTransaction(async (connection) => {
+    const gate = await completeCalibrationReturnGateEntry(connection, gateEntryId, user);
+    const dispatch = await repository.getCalibrationDispatchForUpdate(connection, calibrationDispatchId, user.tenantId);
+    if (!dispatch) throw new AppError("Calibration dispatch challan not found.", 404);
+    if (dispatch.dispatchStatus === "CANCELLED") throw new AppError("A cancelled calibration dispatch challan cannot receive a return.", 409);
+    if (returnDate < dispatch.dispatchDate) throw new AppError("Return Date cannot be before the Dispatch Date.");
+
+    const dispatchedGaugeIds = new Set(await repository.listCalibrationDispatchGaugeIds(connection, calibrationDispatchId, user.tenantId));
+    for (const item of items) {
+      if (!dispatchedGaugeIds.has(item.gaugeMasterId)) {
+        throw new AppError("Every received Gauge ID must belong to the selected calibration dispatch challan.", 409);
+      }
+    }
+
+    const gauges = [];
+    for (const item of items) {
+      const gauge = await loadGaugeForUpdate(connection, item.gaugeMasterId, user);
+      assertLifecycle(gauge, ["UNDER_CALIBRATION"]);
+      gauges.push(gauge);
+    }
+
+    const financialYear = getFinancialYear(new Date(`${returnDate}T00:00:00`));
+    await ensureDocumentSequence(connection, "GAUGE_CALIBRATION_RETURN_GRN", financialYear, "CGRN");
+    const returnGrnNumber = await getNextDocumentNumber(connection, "GAUGE_CALIBRATION_RETURN_GRN", financialYear);
+    const calibrationReturnId = await repository.insertMovementBatch(connection, {
+      tenantId: user.tenantId,
+      movementNumber: returnGrnNumber,
+      movementType: "CALIBRATION_RETURN",
+      movementDate: returnDate,
+      calibrationAgency: dispatch.calibrationAgency,
+      challanNumber: returnGrnNumber,
+      sourceCalibrationDispatchId: Number(calibrationDispatchId),
+      gateEntryId,
+      locationName: returnLocation,
+      remarks,
+      createdBy: user.userCode,
+    });
+
+    for (const item of items) {
+      const gauge = gauges.find((entry) => entry.gaugeMasterId === item.gaugeMasterId);
+      const operationalStatus = item.calibrationResult === "PASS" ? "AVAILABLE" : "REJECTED";
+      const calibrationDueDate = item.calibrationResult === "PASS"
+        ? calculateCalibrationDueDate(item.calibrationDate, gauge.calibrationFrequencyMonths)
+        : null;
       await repository.updateLifecycle(connection, gauge.gaugeMasterId, {
-        operationalStatus: "UNDER_CALIBRATION", currentLocation: calibrationAgency, assignedTo: null, calibrationAgency,
+        operationalStatus,
+        currentLocation: returnLocation,
+        assignedTo: null,
+        lastCalibrationDate: item.calibrationDate,
+        calibrationDueDate,
+        calibrationAgency: dispatch.calibrationAgency,
       }, user.userCode);
-      await addHistory(connection, user, gauge.gaugeMasterId, "CALIBRATION_DISPATCHED", {
-        gaugeMovementBatchId: calibrationDispatchId, eventDate: dispatchDate, operationalStatus: "UNDER_CALIBRATION",
-        locationName: calibrationAgency, calibrationAgency, remarks,
+      await addHistory(connection, user, gauge.gaugeMasterId, "CALIBRATION_RETURNED", {
+        gaugeMovementBatchId: calibrationReturnId,
+        eventDate: returnDate,
+        operationalStatus,
+        locationName: returnLocation,
+        calibrationAgency: dispatch.calibrationAgency,
+        calibrationResult: item.calibrationResult,
+        calibrationDueDate,
+        certificateNumber: item.certificateNumber,
+        certificateFile: item.certificateFile,
+        remarks: item.remarks || remarks,
       });
     }
-    await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_CALIBRATION_DISPATCH",
-      entityId: calibrationDispatchId, action: "CALIBRATION_DISPATCH_CREATED", newValue: {
-        challanNumber, servicePurchaseOrderId, servicePoNumber: servicePurchaseOrder.poNumber, calibrationAgency,
-        expectedReturnDate, courierReference, gaugeMasterIds,
-      }, performedBy: user.userCode });
-    return repository.getCalibrationDispatch(calibrationDispatchId, user.tenantId, connection);
+
+    const returnedGaugeCount = await repository.countCalibrationDispatchReturnedGauges(connection, calibrationDispatchId, user.tenantId);
+    const dispatchStatus = returnedGaugeCount >= dispatchedGaugeIds.size ? "RETURNED" : "PARTIALLY_RETURNED";
+    await repository.updateCalibrationDispatchStatus(connection, calibrationDispatchId, user.tenantId, dispatchStatus);
+    await recordAudit({
+      connection,
+      tenantId: user.tenantId,
+      module: "GAUGE",
+      entityType: "GAUGE_CALIBRATION_RETURN_GRN",
+      entityId: calibrationReturnId,
+      action: "CALIBRATION_RETURN_GRN_CREATED",
+      newValue: { returnGrnNumber, calibrationDispatchId: Number(calibrationDispatchId), gateEntryId, gateEntryNumber: gate.gateEntryNumber, returnDate, returnLocation, dispatchStatus, gaugeMasterIds: items.map((item) => item.gaugeMasterId) },
+      performedBy: user.userCode,
+    });
+    return repository.getCalibrationReturn(calibrationReturnId, user.tenantId, connection);
   });
 }
 
@@ -247,6 +410,7 @@ export async function register(raw, user) {
         : data.calibrationFrequencyMonths,
       calibrationAgency: raw.calibrationAgency === undefined ? clean(source.calibrationAgency) : data.calibrationAgency,
     };
+    await assertCalibrationAgencySupplier(connection, registrationData.calibrationAgency);
     const registeredQuantity = Number(source.registeredQuantity || 0);
     const inventoryQuantity = await repository.getRegistrationStockForUpdate(connection, source);
     const registrationAvailable = Math.max(Math.floor(inventoryQuantity) - registeredQuantity, 0);
@@ -268,7 +432,7 @@ export async function register(raw, user) {
         instrumentAbbreviation: registrationData.instrumentAbbreviation,
         instrumentName: source.itemDescription,
         itemCode: source.itemCode,
-        manufacturerSerialNumber: registrationData.manufacturerSerialNumbers[index] || null,
+        manufacturerSerialNumber: registrationData.manufacturerSerialNumberRange || registrationData.manufacturerSerialNumbers[index] || null,
         makeName: registrationData.makeName,
         modelNumber: registrationData.modelNumber,
         measurementRange: registrationData.measurementRange || source.measurementRange || null,
@@ -290,7 +454,7 @@ export async function register(raw, user) {
     }
     await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_MASTER",
       entityId: records[0].gaugeMasterId, action: "GAUGE_BATCH_REGISTERED",
-      newValue: { sourceGrnItemId: registrationData.sourceGrnItemId, quantity: registrationData.quantity, gaugeIds: gaugeIds }, performedBy: user.userCode });
+      newValue: { sourceGrnItemId: registrationData.sourceGrnItemId, quantity: registrationData.quantity, gaugeIds, manufacturerSerialNumberRange: registrationData.manufacturerSerialNumberRange }, performedBy: user.userCode });
     return { sourceGrnNumber: source.grnNumber, records };
   });
 }
@@ -299,25 +463,30 @@ export async function updateGauge(gaugeMasterId, raw, user) {
   return withTransaction(async (connection) => {
     const gauge = await loadGaugeForUpdate(connection, gaugeMasterId, user);
     const data = normalizeUpdate(raw, gauge);
-    data.storageLocationId = await validateStorageLocation(connection, user.tenantId,
-      raw.storageLocationId === undefined ? gauge.storageLocationId : raw.storageLocationId);
+    await assertCalibrationAgencySupplier(connection, data.calibrationAgency);
+    // A gauge’s home storage is set during registration and must not change through Gauge Master edits.
+    data.storageLocationId = gauge.storageLocationId;
     await repository.updateGaugeDetails(connection, gauge.gaugeMasterId, data, user.userCode);
-    await addHistory(connection, user, gauge.gaugeMasterId, "UPDATED", {
-      operationalStatus: gauge.operationalStatus, locationName: data.currentLocation,
-      calibrationAgency: data.calibrationAgency, calibrationDueDate: data.calibrationDueDate,
-      remarks: "Gauge Master details updated.",
-    });
-    await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_MASTER", entityId: gauge.gaugeMasterId, action: "GAUGE_UPDATED", newValue: data, performedBy: user.userCode });
+    const certificateFile = raw.certificateFile && typeof raw.certificateFile === "object" ? raw.certificateFile : null;
+    if (certificateFile?.fileName && certificateFile?.filePath && Number(certificateFile?.fileSizeBytes)) {
+      await addHistory(connection, user, gauge.gaugeMasterId, "CALIBRATION_CERTIFICATE_ATTACHED", {
+        operationalStatus: gauge.operationalStatus, locationName: data.currentLocation, calibrationAgency: data.calibrationAgency,
+        calibrationDueDate: data.calibrationDueDate, certificateNumber: clean(raw.certificateNumber), certificateFile,
+        remarks: "Calibration certificate attached through Gauge Master edit.",
+      });
+    }
+    await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_MASTER", entityId: gauge.gaugeMasterId, action: "GAUGE_UPDATED", newValue: { ...data, certificateFileName: certificateFile?.fileName || null }, performedBy: user.userCode });
     return repository.getGaugeById(gauge.gaugeMasterId, user.tenantId, connection);
   });
 }
 
 export async function issueGauge(gaugeMasterId, raw, user) {
   const issuedTo = clean(raw.issuedTo);
-  const issueLocation = clean(raw.issueLocation);
+  const requestedIssueLocation = clean(raw.issueLocation);
   const issueDate = validDate(raw.issueDate || today(), "Issue Date", true);
-  if (!issuedTo || !issueLocation) throw new AppError("Issued To and Issue Location are required.");
+  if (!issuedTo || !requestedIssueLocation) throw new AppError("Issued To and Issue Location are required.");
   return withTransaction(async (connection) => {
+    const issueLocation = await resolveActiveIssueLocation(connection, user.tenantId, requestedIssueLocation);
     const gauge = await loadGaugeForUpdate(connection, gaugeMasterId, user);
     assertLifecycle(gauge, ["AVAILABLE"]);
     if (!usableConditions.has(gauge.calibrationCondition)) throw new AppError("Only calibrated gauges that are on time, due soon, or due today can be issued.", 409);
@@ -341,15 +510,33 @@ export async function returnGauge(gaugeMasterId, raw, user) {
   });
 }
 
+export async function retireGauge(gaugeMasterId, raw, user) {
+  return withTransaction(async (connection) => {
+    const gauge = await loadGaugeForUpdate(connection, gaugeMasterId, user);
+    assertLifecycle(gauge, ["AVAILABLE"]);
+    await repository.updateLifecycle(connection, gauge.gaugeMasterId, {
+      operationalStatus: "RETIRED", currentLocation: gauge.currentLocation, assignedTo: null,
+    }, user.userCode);
+    await addHistory(connection, user, gauge.gaugeMasterId, "RETIRED", {
+      operationalStatus: "RETIRED", locationName: gauge.currentLocation,
+      remarks: clean(raw.remarks) || "Gauge Master record retired.",
+    });
+    await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_MASTER",
+      entityId: gauge.gaugeMasterId, action: "GAUGE_RETIRED", newValue: { gaugeId: gauge.gaugeId }, performedBy: user.userCode });
+    return repository.getGaugeById(gauge.gaugeMasterId, user.tenantId, connection);
+  });
+}
+
 export async function bulkIssueGauges(raw, user) {
   const gaugeMasterIds = normalizeBatchGaugeIds(raw.gaugeMasterIds);
   const issuedTo = clean(raw.issuedTo);
-  const issueLocation = clean(raw.issueLocation);
+  const requestedIssueLocation = clean(raw.issueLocation);
   const issueDate = validDate(raw.issueDate || today(), "Issue Date", true);
   const remarks = clean(raw.remarks);
-  if (!issuedTo || !issueLocation) throw new AppError("Issued To and Issue Location are required.");
+  if (!issuedTo || !requestedIssueLocation) throw new AppError("Issued To and Issue Location are required.");
 
   return withTransaction(async (connection) => {
+    const issueLocation = await resolveActiveIssueLocation(connection, user.tenantId, requestedIssueLocation);
     const gauges = [];
     for (const gaugeMasterId of gaugeMasterIds) gauges.push(await loadGaugeForUpdate(connection, gaugeMasterId, user));
     for (const gauge of gauges) {
@@ -416,6 +603,32 @@ export async function bulkReturnGauges(raw, user) {
   });
 }
 
+export async function bulkCollectForCalibration(raw, user) {
+  const gaugeMasterIds = normalizeBatchGaugeIds(raw.gaugeMasterIds);
+  const collectionLocation = clean(raw.collectionLocation) || "Collected for Calibration";
+  const collectionDate = validDate(raw.collectionDate || today(), "Collection Date", true);
+  const remarks = clean(raw.remarks);
+
+  return withTransaction(async (connection) => {
+    const gauges = [];
+    for (const gaugeMasterId of gaugeMasterIds) gauges.push(await loadGaugeForUpdate(connection, gaugeMasterId, user));
+    for (const gauge of gauges) assertLifecycle(gauge, ["AVAILABLE"]);
+
+    for (const gauge of gauges) {
+      await repository.updateLifecycle(connection, gauge.gaugeMasterId, {
+        operationalStatus: "COLLECTED_FOR_CALIBRATION", currentLocation: collectionLocation, assignedTo: null,
+      }, user.userCode);
+      await addHistory(connection, user, gauge.gaugeMasterId, "COLLECTED_FOR_CALIBRATION", {
+        eventDate: collectionDate, operationalStatus: "COLLECTED_FOR_CALIBRATION", locationName: collectionLocation, remarks,
+      });
+    }
+    await recordAudit({ connection, tenantId: user.tenantId, module: "GAUGE", entityType: "GAUGE_MASTER",
+      entityId: gauges[0].gaugeMasterId, action: "GAUGES_BULK_COLLECTED_FOR_CALIBRATION",
+      newValue: { gaugeMasterIds, collectionLocation, collectionDate, remarks }, performedBy: user.userCode });
+    return { gaugeCount: gauges.length, gaugeIds: gauges.map((gauge) => gauge.gaugeId), collectionLocation, collectionDate };
+  });
+}
+
 export async function collectForCalibration(gaugeMasterId, raw, user) {
   const collectionLocation = clean(raw.collectionLocation) || "Collected for Calibration";
   const collectionDate = validDate(raw.collectionDate || today(), "Collection Date", true);
@@ -430,12 +643,14 @@ export async function collectForCalibration(gaugeMasterId, raw, user) {
 
 export async function startCalibration(gaugeMasterId, raw, user) {
   const calibrationLocation = clean(raw.calibrationLocation) || "Under Calibration";
+  const calibrationAgency = clean(raw.calibrationAgency);
   const startDate = validDate(raw.startDate || today(), "Calibration Start Date", true);
   return withTransaction(async (connection) => {
     const gauge = await loadGaugeForUpdate(connection, gaugeMasterId, user);
     assertLifecycle(gauge, ["COLLECTED_FOR_CALIBRATION"]);
+    await assertCalibrationAgencySupplier(connection, calibrationAgency);
     await repository.updateLifecycle(connection, gauge.gaugeMasterId, { operationalStatus: "UNDER_CALIBRATION", currentLocation: calibrationLocation, assignedTo: null }, user.userCode);
-    await addHistory(connection, user, gauge.gaugeMasterId, "CALIBRATION_STARTED", { eventDate: startDate, operationalStatus: "UNDER_CALIBRATION", locationName: calibrationLocation, calibrationAgency: clean(raw.calibrationAgency), remarks: clean(raw.remarks) });
+    await addHistory(connection, user, gauge.gaugeMasterId, "CALIBRATION_STARTED", { eventDate: startDate, operationalStatus: "UNDER_CALIBRATION", locationName: calibrationLocation, calibrationAgency, remarks: clean(raw.remarks) });
     return repository.getGaugeById(gauge.gaugeMasterId, user.tenantId, connection);
   });
 }
@@ -450,7 +665,9 @@ export async function recordCalibration(gaugeMasterId, raw, user) {
     const gauge = await loadGaugeForUpdate(connection, gaugeMasterId, user);
     assertLifecycle(gauge, ["UNDER_CALIBRATION", "UNDER_SERVICE"]);
     const operationalStatus = result === "PASS" ? "AVAILABLE" : "REJECTED";
-    const calibrationAgency = clean(raw.calibrationAgency) || gauge.calibrationAgency;
+    const requestedCalibrationAgency = clean(raw.calibrationAgency);
+    await assertCalibrationAgencySupplier(connection, requestedCalibrationAgency);
+    const calibrationAgency = requestedCalibrationAgency || gauge.calibrationAgency;
     const calibrationDueDate = result === "PASS"
       ? calculateCalibrationDueDate(calibrationDate, gauge.calibrationFrequencyMonths)
       : null;

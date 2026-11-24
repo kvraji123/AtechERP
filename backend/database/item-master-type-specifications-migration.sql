@@ -55,7 +55,7 @@ FROM (
 
   SELECT 'CA','Holders','item_subtype','Item Type','SELECT','Y',JSON_ARRAY('BT40','BT50'),NULL,NULL,NULL,NULL,NULL,10 UNION ALL
   SELECT 'CA','Holders','holder_length','Holder Length','NUMBER','N',NULL,JSON_ARRAY('MM','CM','MTR'),'MM',NULL,NULL,NULL,20 UNION ALL
-  SELECT 'CA','Holders','holder_type','Holder Type','SELECT','N',JSON_ARRAY('ER11','ER16','ER20','ER25','ER32','ER40'),NULL,NULL,NULL,NULL,NULL,30 UNION ALL
+  SELECT 'CA','Holders','holder_type','Holder Type','SELECT','N',JSON_ARRAY('ER11','ER16','ER20','ER25','ER32','ER40','CKB1','CKB2','CKB3','CKB4','CKB5','CKB6'),NULL,NULL,NULL,NULL,NULL,30 UNION ALL
 
   SELECT 'CA','Turning Bars','specification','Specification','TEXT','N',NULL,NULL,NULL,NULL,NULL,NULL,10 UNION ALL
 

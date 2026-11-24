@@ -1,0 +1,2 @@
+ALTER TABLE item_master
+  ADD COLUMN tax_percent DECIMAL(7,4) NOT NULL DEFAULT 0.0000 AFTER hsn_code;

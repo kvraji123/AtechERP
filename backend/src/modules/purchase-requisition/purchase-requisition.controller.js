@@ -15,4 +15,7 @@ export async function update(req, res) {
   const submitted = String(req.body.action || "DRAFT").toUpperCase() === "SUBMIT";
   return sendSuccess(res, { message: submitted ? "Purchase requisition submitted." : "Purchase requisition draft updated.", data: await service.updateDraft(req.params.id, req.body, req.user) });
 }
+export async function remove(req, res) {
+  return sendSuccess(res, { message: "Purchase requisition deleted.", data: await service.deleteDraft(req.params.id, req.user) });
+}
 export async function submit(req, res) { return sendSuccess(res, { message: "Purchase requisition submitted.", data: await service.updateDraft(req.params.id, { ...req.body, action: "SUBMIT" }, req.user) }); }

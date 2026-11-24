@@ -1,4 +1,4 @@
-import { BadgeCheck, Clock3, Eye, FilePenLine, FilePlus2, PackageCheck, Pencil, RefreshCw, Search, Send, ShoppingBag, Sparkles, X } from "lucide-react";
+import { BadgeCheck, Clock3, Eye, FilePenLine, FilePlus2, PackageCheck, Pencil, RefreshCw, Search, Send, ShoppingBag, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiMessage } from "../../../api/client";
@@ -7,6 +7,7 @@ import { useAppFeedback } from "../../../components/AppFeedback";
 import Pagination, { PAGE_SIZE } from "../../../components/Pagination";
 import PurchaseModuleTabs from "./components/PurchaseModuleTabs";
 import PurchaseOrderApprovedPrTab from "./components/PurchaseOrderApprovedPrTab";
+import PurchaseOrderFullViewDialog from "./components/PurchaseOrderFullViewDialog";
 import PurchaseRequestViewDialog from "./components/PurchaseRequestViewDialog";
 import { mapApiRfqPurchaseRequest, type ApiPurchaseRequisitionRow, type RfqPurchaseRequest } from "./purchaseRfqRequests";
 import "./PurchaseFlow.css";
@@ -43,17 +44,6 @@ const statusLabel = (status: string) => ({
 }[status] || status.replace(/_/g, " "));
 
 const sourceKind = (reference: string): Exclude<SourceFilter, "ALL"> => /RFQ|PE\//i.test(reference) ? "RFQ" : "DIRECT";
-
-const getDetailValue = (detail: PurchaseOrderDetail, camel: string, snake: string) => String(detail[camel] ?? detail[snake] ?? "");
-
-const getDetailSourceReference = (detail: PurchaseOrderDetail) => {
-  const headerReference = getDetailValue(detail, "sourceReference", "source_reference").trim();
-  if (headerReference) return headerReference;
-  const sources = Array.isArray(detail.sources) ? detail.sources as Array<Record<string, unknown>> : [];
-  return [...new Set(sources
-    .map((source) => String(source.prNumber ?? source.pr_number ?? "").trim())
-    .filter(Boolean))].join(", ");
-};
 
 export default function PurchaseOrderListPage() {
   const navigate = useNavigate();
@@ -291,14 +281,14 @@ export default function PurchaseOrderListPage() {
           {error && <p className="purchase-order-list-error" role="alert">{error}</p>}
           <div className="purchase-order-list-table-wrap"><table className="purchase-order-list-table"><thead><tr><th>PO Number</th><th>Source Reference</th><th>Supplier</th><th>PO Date</th><th>Expected Delivery</th><th>Items</th><th className="money">Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>{filtered.map((record) => {
             const recordStatus = String(record.status || "").toUpperCase();
-            return <tr key={record.id}><td><strong>{record.poNumber}</strong><small>Created {formatDate(record.poDate)}</small></td><td><strong className={sourceKind(record.sourceReference || "") === "DIRECT" ? "direct" : ""}>{record.sourceReference || "—"}</strong><small>{sourceKind(record.sourceReference || "") === "DIRECT" ? "Existing item · RFQ not required" : "Quotation comparison"}</small></td><td><strong>{record.supplierName}</strong><small>{record.supplierCode || "—"}</small></td><td>{formatDate(record.poDate)}</td><td>{formatDate(record.expectedDeliveryDate)}</td><td className="text-center">{Number(record.itemCount || 0)}</td><td className="money">{money.format(Number(record.grandTotalAmount || 0))}</td><td><span className={`purchase-order-list-status ${recordStatus.toLowerCase()}`}>{statusLabel(recordStatus)}</span></td><td><div className="purchase-order-row-actions">{["DRAFT", "RETURNED"].includes(recordStatus) && <button type="button" onClick={() => navigate(`/purchase/orders/new?poId=${record.id}`)}><Pencil size={13} /> Edit</button>}{["DRAFT", "RETURNED"].includes(recordStatus) && <button type="button" disabled={submittingId === record.id} onClick={() => { void submitOrder(record); }}><Send size={13} /> {submittingId === record.id ? "Submitting" : "Submit"}</button>}{!["DRAFT", "RETURNED"].includes(recordStatus) && <button type="button" disabled={detailLoading} onClick={() => { void openDetail(record.id); }}><Eye size={13} /> View</button>}{recordStatus === "PARTIALLY_RECEIVED" && <button type="button" onClick={() => navigate(`/purchase/grn?poId=${record.id}`)}><PackageCheck size={13} /> Track GRN</button>}</div></td></tr>;
+            return <tr key={record.id}><td><strong>{record.poNumber}</strong><small>Created {formatDate(record.poDate)}</small></td><td><strong className={sourceKind(record.sourceReference || "") === "DIRECT" ? "direct" : ""}>{record.sourceReference || "—"}</strong><small>{sourceKind(record.sourceReference || "") === "DIRECT" ? "Existing item · RFQ not required" : "Quotation comparison"}</small></td><td><strong>{record.supplierName}</strong><small>{record.supplierCode || "—"}</small></td><td>{formatDate(record.poDate)}</td><td>{formatDate(record.expectedDeliveryDate)}</td><td className="text-center">{Number(record.itemCount || 0)}</td><td className="money">{money.format(Number(record.grandTotalAmount || 0))}</td><td><span className={`purchase-order-list-status ${recordStatus.toLowerCase()}`}>{statusLabel(recordStatus)}</span></td><td><div className="purchase-order-row-actions">{["DRAFT", "RETURNED"].includes(recordStatus) && <button type="button" onClick={() => navigate(`/purchase/orders/new?poId=${record.id}`)}><Pencil size={13} /> Edit</button>}{["DRAFT", "RETURNED"].includes(recordStatus) && <button type="button" disabled={submittingId === record.id} onClick={() => { void submitOrder(record); }}><Send size={13} /> {submittingId === record.id ? "Submitting" : "Submit"}</button>}<button type="button" disabled={detailLoading} onClick={() => { void openDetail(record.id); }}><Eye size={13} /> View</button>{recordStatus === "PARTIALLY_RECEIVED" && <button type="button" onClick={() => navigate(`/grn-inward?poId=${record.id}`)}><PackageCheck size={13} /> Track GRN</button>}</div></td></tr>;
           })}</tbody></table>{loading && <div className="purchase-order-list-empty">Loading purchase orders…</div>}{!loading && !filtered.length && <div className="purchase-order-list-empty">No purchase orders match the selected filters.</div>}</div>
           
         </>}
       </section>
     </div>
 
-    {detail && <div className="purchase-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) setDetail(null); }}><section className="purchase-order-view-dialog" role="dialog" aria-modal="true" aria-labelledby="purchase-order-view-title"><header><div><h2 id="purchase-order-view-title">{getDetailValue(detail, "poNumber", "po_number") || "Purchase Order"}</h2><p>{getDetailValue(detail, "supplierName", "supplier_name_snapshot")} · {getDetailValue(detail, "supplierCode", "supplier_code_snapshot")}</p></div><button type="button" aria-label="Close purchase order details" onClick={() => setDetail(null)}><X size={18} /></button></header><div className="purchase-order-view-meta"><div><small>Source Reference</small><strong>{getDetailSourceReference(detail) || "—"}</strong></div><div><small>PO Date</small><strong>{formatDate(getDetailValue(detail, "poDate", "po_date"))}</strong></div><div><small>Expected Delivery</small><strong>{formatDate(getDetailValue(detail, "expectedDeliveryDate", "expected_delivery_date"))}</strong></div><div><small>Status</small><strong>{statusLabel(getDetailValue(detail, "status", "status"))}</strong></div><div><small>Items</small><strong>{detail.items?.length || 0}</strong></div><div><small>Total Amount</small><strong>{money.format(Number(detail.grandTotalAmount ?? detail.grand_total_amount ?? 0))}</strong></div></div><footer><button type="button" className="purchase-secondary-button" onClick={() => setDetail(null)}>Close</button></footer></section></div>}
+    {detail && <PurchaseOrderFullViewDialog detail={detail} onClose={() => setDetail(null)} />}
     <PurchaseRequestViewDialog request={viewRequest} onClose={() => setViewRequest(null)} />
   </div>;
 }

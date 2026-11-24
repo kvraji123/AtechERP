@@ -20,12 +20,16 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingCart,
+  Send,
   Users,
+  Warehouse,
   X,
   Gauge,
+  PackageCheck,
+  Wrench,
 } from "lucide-react";
 
-import logo from "../assets/atech-logo.jpeg";
+import CompanyMark from "../components/CompanyMark";
 import { useAuth } from "../context/AuthContext";
 
 type SidebarProps = {
@@ -119,8 +123,12 @@ export default function Sidebar({
   const purchaseRouteActive =
     location.pathname.startsWith("/purchase");
 
-  const inventoryRouteActive =
-    location.pathname.startsWith("/inventory");
+  const grnRouteActive = location.pathname.startsWith("/gate-entry")
+    || location.pathname.startsWith("/grn-inward")
+    || location.pathname.startsWith("/material-outward")
+    || location.pathname.startsWith("/gate-exit");
+  const inventoryRouteActive = location.pathname.startsWith("/inventory");
+  const toolingRouteActive = location.pathname.startsWith("/tooling");
   const gaugeMasterRouteActive = location.pathname === "/masters/gauges"
     || location.pathname === "/masters/gauges/register"
     || /^\/masters\/gauges\/\d+/.test(location.pathname);
@@ -128,12 +136,19 @@ export default function Sidebar({
   const [mastersOpen, setMastersOpen] = useState(
     mastersRouteActive
   );
+  const [grnOpen, setGrnOpen] = useState(grnRouteActive);
 
   useEffect(() => {
     if (mastersRouteActive) {
       setMastersOpen(true);
     }
   }, [mastersRouteActive]);
+
+  useEffect(() => {
+    if (grnRouteActive) {
+      setGrnOpen(true);
+    }
+  }, [grnRouteActive]);
 
   const visibleMenus = useMemo<MenuItem[]>(() => {
     const menus = Array.isArray(user?.menus)
@@ -178,11 +193,7 @@ export default function Sidebar({
         }`}
       >
         <div className="sidebar-brand">
-          <img
-            src={logo}
-            alt="A Tech Automation"
-            className="sidebar-company-logo"
-          />
+          <CompanyMark className="sidebar-company-mark" />
 
           <button
             type="button"
@@ -232,7 +243,7 @@ export default function Sidebar({
           </NavLink>
 
           <NavLink
-            to="/purchase"
+            to="/purchase/requests"
             onClick={onClose}
             className={`sidebar-link ${purchaseRouteActive ? "active" : ""}`}
           >
@@ -241,6 +252,43 @@ export default function Sidebar({
             </span>
             <span className="sidebar-link-text">Purchase</span>
           </NavLink>
+
+          <div className="sidebar-menu-group">
+            <button
+              type="button"
+              className={`sidebar-link sidebar-parent-link ${grnRouteActive ? "active-parent" : ""}`}
+              onClick={() => setGrnOpen((current) => !current)}
+            >
+              <span className="sidebar-link-icon">
+                <Warehouse size={18} />
+              </span>
+              <span className="sidebar-link-text">GRN</span>
+              <span className="sidebar-expand-icon">
+                {grnOpen ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
+              </span>
+            </button>
+
+            {grnOpen && (
+              <div className="sidebar-submenu">
+                <NavLink to="/gate-entry" onClick={onClose} className={() => `sidebar-submenu-link ${location.pathname.startsWith("/gate-entry") ? "active" : ""}`}>
+                  <Warehouse size={16} />
+                  <span>Gate Entry</span>
+                </NavLink>
+                <NavLink to="/grn-inward" onClick={onClose} className={() => `sidebar-submenu-link ${location.pathname.startsWith("/grn-inward") ? "active" : ""}`}>
+                  <PackageCheck size={16} />
+                  <span>GRN Inward</span>
+                </NavLink>
+                <NavLink to="/material-outward" onClick={onClose} className={() => `sidebar-submenu-link ${location.pathname.startsWith("/material-outward") ? "active" : ""}`}>
+                  <Send size={16} />
+                  <span>GRN Outward</span>
+                </NavLink>
+                <NavLink to="/gate-exit" onClick={onClose} className={() => `sidebar-submenu-link ${location.pathname.startsWith("/gate-exit") ? "active" : ""}`}>
+                  <LogOut size={16} />
+                  <span>Gate Exit</span>
+                </NavLink>
+              </div>
+            )}
+          </div>
 
           <NavLink
             to="/inventory"
@@ -251,6 +299,17 @@ export default function Sidebar({
               <Boxes size={18} />
             </span>
             <span className="sidebar-link-text">Inventory</span>
+          </NavLink>
+
+          <NavLink
+            to="/tooling"
+            onClick={onClose}
+            className={`sidebar-link ${toolingRouteActive ? "active" : ""}`}
+          >
+            <span className="sidebar-link-icon">
+              <Wrench size={18} />
+            </span>
+            <span className="sidebar-link-text">Tooling</span>
           </NavLink>
 
           <div className="sidebar-menu-group">
@@ -352,6 +411,21 @@ export default function Sidebar({
                 </NavLink>
 
                 <NavLink
+                  to="/masters/tools"
+                  onClick={onClose}
+                  className={() =>
+                    `sidebar-submenu-link ${
+                      location.pathname.startsWith("/masters/tools")
+                        ? "active"
+                        : ""
+                    }`
+                  }
+                >
+                  <Wrench size={16} />
+                  <span>Tool Master</span>
+                </NavLink>
+
+                <NavLink
                   to="/masters/machines/new"
                   onClick={onClose}
                   className={() =>
@@ -379,6 +453,14 @@ export default function Sidebar({
                 <NavLink to="/masters/instruments" onClick={onClose}
                   className={() => `sidebar-submenu-link ${location.pathname.startsWith("/masters/instruments") ? "active" : ""}`}>
                   <Gauge size={16} /><span>Instrument Master</span>
+                </NavLink>
+                <NavLink to="/masters/inspection-characteristics" onClick={onClose}
+                  className={() => `sidebar-submenu-link ${location.pathname.startsWith("/masters/inspection-characteristics") ? "active" : ""}`}>
+                  <Ruler size={16} /><span>Inspection Characteristic LOV</span>
+                </NavLink>
+                <NavLink to="/masters/inspection-frequencies" onClick={onClose}
+                  className={() => `sidebar-submenu-link ${location.pathname.startsWith("/masters/inspection-frequencies") ? "active" : ""}`}>
+                  <Settings2 size={16} /><span>Inspection Frequency LOV</span>
                 </NavLink>
                 <NavLink to="/masters/gauges" onClick={onClose}
                   className={() => `sidebar-submenu-link ${gaugeMasterRouteActive ? "active" : ""}`}>

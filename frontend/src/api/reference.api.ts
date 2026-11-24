@@ -6,6 +6,7 @@ export type ReferenceData = {
   materials: Array<{ materialId: number; materialName: string }>;
   uoms: Array<{ uomId: number; uomCode: string; uomName: string }>;
   grades: Array<{ materialGradeId: number; materialId: number; gradeCode: string; gradeName: string }>;
+  departments: Array<{ departmentId: number; departmentCode: string; departmentName: string; displayOrder: number }>;
 };
 
 export const referenceApi = {

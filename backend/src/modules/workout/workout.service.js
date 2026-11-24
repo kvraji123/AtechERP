@@ -1,30 +1,81 @@
-import { withTransaction } from "../../config/db.js";
+import { db } from "../../config/db.js";
 import { AppError } from "../../utils/AppError.js";
+import { isValidDateOnly, todayInAppTimeZone } from "../../utils/dateTime.js";
+import * as enquiryRepository from "../enquiry/enquiry.repository.js";
+import { findMarketingDatabaseByEnquiryPartId } from "../marketing/marketing-database.js";
 import * as repository from "./workout.repository.js";
 
 const number = (value) => Number(value ?? 0);
 const money = (value) => Number(number(value).toFixed(2));
 const rate = (value) => Number(number(value).toFixed(4));
 const hasPermission = (user, permission) => user?.permissions?.includes(permission);
+const MACHINE_RATE_PROCESS_TYPES = new Set(["VMC", "HMC", "TURNING"]);
+
+function ensureNotFutureDate(value, label) {
+  if (value === null || value === undefined || String(value).trim() === "") return;
+  const date = String(value).trim();
+  if (!isValidDateOnly(date)) throw new AppError(`${label} must be a valid date.`);
+  if (date > todayInAppTimeZone()) throw new AppError(`${label} cannot be a future date.`);
+}
+
+function hasEnteredNumber(value) {
+  return String(value ?? "").trim() !== "";
+}
+
+function usesMachineRateCalculation(processType) {
+  return MACHINE_RATE_PROCESS_TYPES.has(String(processType || "").trim().toUpperCase());
+}
+
+function subpartUsesMachineRateCalculation(processType, description) {
+  return usesMachineRateCalculation(processType) || usesMachineRateCalculation(description);
+}
+
+function configuredMachineCost(machineCostByProcess, processType, description) {
+  const keys = [processType, description]
+    .map((value) => String(value || "").trim().toUpperCase())
+    .filter(Boolean);
+  for (const key of keys) {
+    if (machineCostByProcess.has(key)) return machineCostByProcess.get(key);
+  }
+  return null;
+}
 
 function ensureNonNegative(value, label) {
   if (!Number.isFinite(value) || value < 0) throw new AppError(`${label} must be zero or positive.`);
 }
 
-function normalizeProcessCosts(lines) {
+function normalizeProcessCosts(lines, machineCostByProcess) {
   if (!Array.isArray(lines)) return [];
   return lines.slice(0, 50).map((line) => {
     const processType = String(line?.processType || "").trim().toUpperCase().slice(0, 50);
     const description = String(line?.description || "").trim().slice(0, 300);
-    const costInr = number(line?.costInr);
     if (!processType) throw new AppError("Every machining line requires a process type.");
     if (processType === "OTHER" && !description) throw new AppError("Other machining process requires a description.");
+    const calculatedByMachineRate = usesMachineRateCalculation(processType);
+    const hasCycleTime = calculatedByMachineRate && hasEnteredNumber(line?.totalCycleTimeSeconds);
+    const totalCycleTimeSeconds = hasCycleTime ? number(line.totalCycleTimeSeconds) : null;
+    const machineCostInr = calculatedByMachineRate
+      ? (hasEnteredNumber(line?.machineCostInr)
+        ? number(line.machineCostInr)
+        : configuredMachineCost(machineCostByProcess, processType, description))
+      : null;
+    const costInr = calculatedByMachineRate && hasCycleTime
+      ? (machineCostInr === null ? 0 : totalCycleTimeSeconds * machineCostInr / 3600)
+      : number(line?.costInr);
+    if (totalCycleTimeSeconds !== null) ensureNonNegative(totalCycleTimeSeconds, "Total cycle time");
+    if (machineCostInr !== null) ensureNonNegative(machineCostInr, "Machine cost");
     ensureNonNegative(costInr, "Machining process cost");
-    return { processType, description: description || null, costInr: money(costInr) };
+    return {
+      processType,
+      description: description || null,
+      totalCycleTimeSeconds: totalCycleTimeSeconds === null ? null : rate(totalCycleTimeSeconds),
+      machineCostInr: machineCostInr === null ? null : money(machineCostInr),
+      costInr: money(costInr),
+    };
   });
 }
 
-function normalizeSubparts(lines, availableProcessTypes, availableMaterialTypes) {
+function normalizeSubparts(lines, availableProcessTypes, availableMaterialTypes, machineCostByProcess) {
   if (!Array.isArray(lines)) return [];
   return lines.slice(0, 100).map((line, index) => {
     const materialType = String(line?.materialType || "").trim().toUpperCase();
@@ -50,7 +101,17 @@ function normalizeSubparts(lines, availableProcessTypes, availableMaterialTypes)
       .map((process) => {
         const processType = String(process?.processType || "").trim().toUpperCase().slice(0, 50);
         const description = String(process?.description || "").trim().slice(0, 300);
-        const costInr = number(process?.costInr);
+        const calculatedByMachineRate = subpartUsesMachineRateCalculation(processType, description);
+        const hasCycleTime = calculatedByMachineRate && hasEnteredNumber(process?.totalCycleTimeSeconds);
+        const totalCycleTimeSeconds = hasCycleTime ? number(process.totalCycleTimeSeconds) : null;
+        const machineCostInr = calculatedByMachineRate
+          ? (hasEnteredNumber(process?.machineCostInr)
+            ? number(process.machineCostInr)
+            : configuredMachineCost(machineCostByProcess, processType, description))
+          : null;
+        const costInr = calculatedByMachineRate && hasCycleTime
+          ? (machineCostInr === null ? 0 : totalCycleTimeSeconds * machineCostInr / 3600)
+          : number(process?.costInr);
         if (!processType) return null;
         const isCustomProcess = processType.startsWith("CUSTOM_");
         const isGenericMachineCost = processType === "MACHINE_PROCESS_COST";
@@ -64,14 +125,28 @@ function normalizeSubparts(lines, availableProcessTypes, availableMaterialTypes)
           throw new AppError(`Sub-part ${index + 1} contains the same machining process more than once.`);
         }
         seen.add(processType);
+        if (totalCycleTimeSeconds !== null) {
+          ensureNonNegative(totalCycleTimeSeconds, `Sub-part ${index + 1} total cycle time`);
+        }
+        if (machineCostInr !== null) ensureNonNegative(machineCostInr, `Sub-part ${index + 1} machine cost`);
         ensureNonNegative(costInr, `Sub-part ${index + 1} machining process cost`);
-        return { processType, description: description || null, costInr: money(costInr) };
+        return {
+          processType,
+          description: description || null,
+          totalCycleTimeSeconds: totalCycleTimeSeconds === null ? null : rate(totalCycleTimeSeconds),
+          machineCostInr: machineCostInr === null ? null : money(machineCostInr),
+          costInr: money(costInr),
+        };
       })
       .filter(Boolean);
 
-    const enteredMaterialCost = isPurchase
-      ? materialPricePerKg * rmWeightKg
-      : number(line?.materialCostInr);
+    // New requests carry the explicit material cost. Older Workout records only
+    // carried unit price and RM weight, so retain that calculation as a fallback
+    // when the material-cost field is genuinely absent (not deliberately zero).
+    const hasExplicitMaterialCost = Object.hasOwn(line || {}, "materialCostInr");
+    const enteredMaterialCost = hasExplicitMaterialCost
+      ? number(line?.materialCostInr)
+      : materialPricePerKg * rmWeightKg;
     ensureNonNegative(enteredMaterialCost, `Sub-part ${index + 1} material cost`);
     const materialCostInr = money(enteredMaterialCost);
     const totalMachiningCostInr = money(processCosts.reduce((sum, process) => sum + process.costInr, 0));
@@ -93,7 +168,7 @@ function normalizeSubparts(lines, availableProcessTypes, availableMaterialTypes)
   });
 }
 
-function calculate(data, availableProcessTypes = new Set(), availableMaterialTypes = new Set()) {
+function calculate(data, availableProcessTypes = new Set(), availableMaterialTypes = new Set(), machineCostByProcess = new Map()) {
   const currencyRate = number(data.currencyRate);
   if (!(currencyRate > 0)) throw new AppError("Exchange rate must be greater than zero.");
   const assembled = Boolean(data.isAssembledPart);
@@ -102,6 +177,7 @@ function calculate(data, availableProcessTypes = new Set(), availableMaterialTyp
     weightKg: number(data.weightKg),
     materialRate: number(data.materialRatePerKg),
     additionalMaterialCost: number(data.additionalMaterialCostInr),
+    actualMaterialCost: number(data.actualMaterialCostInr),
     assemblyLabour: number(data.assemblyLabourCostInr),
     overheadPercent: number(data.overheadPercent),
     profitValue: number(data.profitValue),
@@ -112,11 +188,11 @@ function calculate(data, availableProcessTypes = new Set(), availableMaterialTyp
     specialTool: number(data.specialToolCostInr),
     gauge: number(data.gaugeCostInr),
     trial: number(data.trialCostInr),
-    sample: number(data.sampleCostInr),
+    sampleCostPercent: number(data.sampleCostPercent),
   };
   Object.entries(values).forEach(([key, value]) => ensureNonNegative(value, key));
-  if (values.overheadPercent > 100 || values.commissionPercent > 100) {
-    throw new AppError("Overhead and commission percentages must be between 0 and 100.");
+  if (values.overheadPercent > 100 || values.commissionPercent > 100 || values.sampleCostPercent > 100) {
+    throw new AppError("Overhead, commission and sample-cost percentages must be between 0 and 100.");
   }
 
   const profitCalculationType = ["FIXED_AMOUNT", "PERCENTAGE"].includes(data.profitCalculationType)
@@ -126,17 +202,22 @@ function calculate(data, availableProcessTypes = new Set(), availableMaterialTyp
     throw new AppError("Profit percentage must be between 0 and 100.");
   }
 
-  const processCosts = assembled ? [] : normalizeProcessCosts(data.processCosts);
-  const subparts = assembled ? normalizeSubparts(data.subparts, availableProcessTypes, availableMaterialTypes) : [];
+  const processCosts = assembled ? [] : normalizeProcessCosts(data.processCosts, machineCostByProcess);
+  const subparts = assembled ? normalizeSubparts(data.subparts, availableProcessTypes, availableMaterialTypes, machineCostByProcess) : [];
   const subpartMaterialCost = money(subparts.reduce((sum, line) => sum + line.materialCostInr, 0));
   const subpartMachiningCost = money(subparts.reduce((sum, line) => sum + line.totalMachiningCostInr, 0));
   const subpartDevelopmentCost = money(subparts.reduce((sum, line) => sum + line.totalDevelopmentCostInr, 0));
   const totalMachining = assembled
     ? money(subpartMachiningCost + values.assemblyLabour)
     : money(processCosts.reduce((sum, line) => sum + line.costInr, 0));
+  // Leave the rate-and-weight calculation as the default, but honor the
+  // explicitly entered Material Cost from the enquiry Workout form.
+  const manuallyEnteredMaterialCost = hasEnteredNumber(data.actualMaterialCostInr)
+    ? money(values.actualMaterialCost)
+    : null;
   const materialCost = assembled
     ? subpartMaterialCost
-    : money(values.weightKg * values.materialRate + values.additionalMaterialCost);
+    : manuallyEnteredMaterialCost ?? money(values.weightKg * values.materialRate + values.additionalMaterialCost);
   const overheadAmount = money(totalMachining * values.overheadPercent / 100);
   const machiningWithOverhead = totalMachining + overheadAmount;
   const profitAmount = money(
@@ -148,6 +229,7 @@ function calculate(data, availableProcessTypes = new Set(), availableMaterialTyp
   const partPriceBeforeCommission = money(materialCost + adjustedMachining + values.packing);
   const commissionAmount = money(partPriceBeforeCommission * values.commissionPercent / 100);
   const finalPartPrice = money(partPriceBeforeCommission + commissionAmount);
+  const sample = money(finalPartPrice * (1 + values.sampleCostPercent / 100));
   const totalDevelopment = assembled
     ? subpartDevelopmentCost
     : money(values.pattern + values.fixture + values.specialTool + values.gauge + values.trial);
@@ -167,6 +249,7 @@ function calculate(data, availableProcessTypes = new Set(), availableMaterialTyp
     subpartDevelopmentCost,
     legacy,
     ...values,
+    sample,
     profitCalculationType,
     materialCost,
     materialCostForeign: foreign(materialCost),
@@ -188,10 +271,13 @@ function calculate(data, availableProcessTypes = new Set(), availableMaterialTyp
 }
 
 function validate(data, totals, submit) {
+  if (!submit) return;
+
   if (!data.workoutDate) throw new AppError("Workout Date is required.");
+  ensureNotFutureDate(data.workoutDate, "Workout Date");
+  ensureNotFutureDate(data.exchangeRateEffectiveDate, "Rate Effective Date");
   const moq = number(data.moq);
   ensureNonNegative(moq, "MOQ");
-  if (!submit) return;
   if (!(moq > 0)) throw new AppError("MOQ must be greater than zero.");
   if (totals.assembled) {
     if (!totals.subparts.length) throw new AppError("Add at least one sub-part for this assembled item.");
@@ -225,6 +311,7 @@ function masters(rows) {
     machiningProcesses: rows.filter((row) => row.referenceType === "MACHINING_PROCESS").map((row) => ({
       value: row.valueCode,
       label: row.displayLabel,
+      machineCostInr: row.numericValue === null || row.numericValue === undefined ? null : number(row.numericValue),
     })),
     subpartMaterialTypes: rows.filter((row) => row.referenceType === "SUBPART_MATERIAL_TYPE").map((row) => ({
       value: row.valueCode,
@@ -259,13 +346,14 @@ function assertEligible(part) {
 }
 
 export async function getWorkout(enquiryPartId, user) {
-  const part = await repository.getPart(enquiryPartId);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  const part = await repository.getPart(enquiryPartId, marketingDatabase.pool);
   assertEligible(part);
   const [workout, items, references, processPlans] = await Promise.all([
-    repository.getWorkout(enquiryPartId),
-    repository.getEnquiryParts(part.enquiry_id),
-    repository.getReferenceValues(),
-    repository.getPartProcessPlans(part.part_id),
+    repository.getWorkout(enquiryPartId, marketingDatabase.pool),
+    repository.getEnquiryParts(part.enquiry_id, marketingDatabase.pool),
+    repository.getReferenceValues(db),
+    repository.getPartProcessPlans(part.part_id, db),
   ]);
   return { part, items, workout, processPlans, masters: masters(references), workflow: workflow(part, workout, user) };
 }
@@ -274,7 +362,8 @@ export async function saveWorkout(enquiryPartId, data, user, submit = false) {
   if (submit && !hasPermission(user, "COMPLETE_WORKOUT")) {
     throw new AppError("You do not have permission to complete Workout.", 403);
   }
-  return withTransaction(async (connection) => {
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  return marketingDatabase.withTransaction(async (connection) => {
     const part = await repository.getPart(enquiryPartId, connection);
     assertEligible(part);
     const existing = await repository.getWorkout(enquiryPartId, connection);
@@ -286,26 +375,40 @@ export async function saveWorkout(enquiryPartId, data, user, submit = false) {
       throw new AppError("Completed Workout can only be updated, not completed again.", 409);
     }
 
-    const references = await repository.getReferenceValues(connection);
+    const references = await repository.getReferenceValues(db);
     const availableCurrencies = masters(references).currencies;
     const selectedCurrency = availableCurrencies.find((item) => item.value === data.currencyCode);
-    if (!selectedCurrency) throw new AppError("Select a configured quotation currency.");
+    if (!selectedCurrency && (submit || updatingCompleted)) {
+      throw new AppError("Select a configured quotation currency.");
+    }
+    const draftCurrency = selectedCurrency || {
+      value: String(data.currencyCode || "").trim() || "INR",
+      exchangeRate: 1,
+      effectiveDate: null,
+    };
+    const requestedRate = number(data.currencyRate);
     const prepared = {
       ...data,
       isAssembledPart: Boolean(Number(part.is_assembled_part)),
       // Payment terms are owned by the approved Feasibility record, not edited in Workout.
       paymentTerms: part.feasibility_payment_terms || null,
-      currencyCode: selectedCurrency.value,
-      currencyRate: number(data.currencyRate) || selectedCurrency.exchangeRate,
-      exchangeRateEffectiveDate: data.exchangeRateEffectiveDate || selectedCurrency.effectiveDate,
+      workoutDate: data.workoutDate || todayInAppTimeZone(),
+      currencyCode: draftCurrency.value,
+      currencyRate: requestedRate > 0 ? requestedRate : Number(draftCurrency.exchangeRate) || 1,
+      exchangeRateEffectiveDate: data.exchangeRateEffectiveDate || draftCurrency.effectiveDate,
     };
-    const availableProcessTypes = new Set(
-      masters(references).machiningProcesses.map((item) => item.value)
-    );
+    const configuredMasters = masters(references);
+    const availableProcessTypes = new Set(configuredMasters.machiningProcesses.map((item) => item.value));
     const availableMaterialTypes = new Set(
-      masters(references).subpartMaterialTypes.map((item) => item.value)
+      configuredMasters.subpartMaterialTypes.map((item) => item.value)
     );
-    const totals = calculate(prepared, availableProcessTypes, availableMaterialTypes);
+    const machineCostByProcess = new Map();
+    configuredMasters.machiningProcesses.forEach((item) => {
+      if (item.machineCostInr === null) return;
+      machineCostByProcess.set(String(item.value).toUpperCase(), item.machineCostInr);
+      machineCostByProcess.set(String(item.label).toUpperCase(), item.machineCostInr);
+    });
+    const totals = calculate(prepared, availableProcessTypes, availableMaterialTypes, machineCostByProcess);
     validate(prepared, totals, submit);
 
     const workoutNo = existing?.workout_no || `${part.doc_no}/${String(part.line_number).padStart(2, "0")}`;
@@ -314,7 +417,7 @@ export async function saveWorkout(enquiryPartId, data, user, submit = false) {
       : submit
         ? "COMPLETED"
         : "DRAFT";
-    await repository.upsertWorkout(connection, part, workoutNo, prepared, totals, user.userCode, saveStatus);
+    await repository.upsertWorkout(connection, part, workoutNo, prepared, totals, user.userCode, saveStatus, db);
     await repository.replaceProcessCosts(connection, enquiryPartId, totals.processCosts, user.userCode);
     await repository.replaceSubparts(connection, enquiryPartId, totals.subparts, user.userCode);
     await repository.replaceNotes(connection, enquiryPartId, Array.isArray(data.notes) ? data.notes : [], user.userCode);
@@ -326,6 +429,23 @@ export async function saveWorkout(enquiryPartId, data, user, submit = false) {
       );
     }
     if (submit) await repository.completeWorkout(connection, part, user);
-    return repository.getWorkout(enquiryPartId, connection);
+    const savedWorkout = await repository.getWorkout(enquiryPartId, connection);
+    await enquiryRepository.appendEnquiryRevision(connection, {
+      enquiryId: part.enquiry_id,
+      revisionAction: submit ? "WORKOUT_COMPLETED" : "WORKOUT_SAVED",
+      saveStatus: part.enquiry_save_status,
+      snapshot: {
+        stage: "WORKOUT",
+        enquiryPartId: Number(enquiryPartId),
+        part: {
+          partNumber: part.part_number,
+          drawingNumber: part.drawing_number,
+          drawingRevisionNumber: part.drawing_revision_number,
+        },
+        workout: savedWorkout,
+      },
+      userCode: user.userCode,
+    });
+    return savedWorkout;
   });
 }

@@ -1,15 +1,16 @@
 import DateInput from "../../../../components/DateInput";
 import { CalendarDays, FileText, UserRound } from "lucide-react";
-import { departmentOptions } from "../purchaseData";
 import type { PurchaseRequestDetailsState, SupplierOption } from "../types";
 
 type PurchaseRequestDetailsProps = {
   value: PurchaseRequestDetailsState;
   onChange: (next: PurchaseRequestDetailsState) => void;
   supplierOptions?: SupplierOption[];
+  departments?: Array<{ departmentCode: string; departmentName: string }>;
 };
 
-export default function PurchaseRequestDetails({ value, onChange, supplierOptions = [] }: PurchaseRequestDetailsProps) {
+export default function PurchaseRequestDetails({ value, onChange, supplierOptions = [], departments = [] }: PurchaseRequestDetailsProps) {
+  const supplierRequired = value.requisitionType === "EXISTING_ITEM";
   const update = <K extends keyof PurchaseRequestDetailsState>(
     key: K,
     fieldValue: PurchaseRequestDetailsState[K]
@@ -38,7 +39,8 @@ export default function PurchaseRequestDetails({ value, onChange, supplierOption
         <span>Department <b>*</b></span>
         <select value={value.department} onChange={(event) => update("department", event.target.value)} required>
           <option value="">Select department</option>
-          {departmentOptions.map((department) => <option key={department}>{department}</option>)}
+          {value.department && !departments.some((department) => department.departmentName === value.department) && <option value={value.department}>Existing: {value.department}</option>}
+          {departments.map((department) => <option key={department.departmentCode} value={department.departmentName}>{department.departmentName}</option>)}
         </select>
       </label>
 
@@ -84,14 +86,14 @@ export default function PurchaseRequestDetails({ value, onChange, supplierOption
       </label>
 
       <label className="purchase-field">
-        <span>Preferred Supplier</span>
-        <select value={value.preferredSupplier} onChange={(event) => update("preferredSupplier", event.target.value)}>
-          <option value="">No preference</option>
+        <span>Preferred Supplier{supplierRequired && <b>*</b>}</span>
+        <select value={value.preferredSupplier} onChange={(event) => update("preferredSupplier", event.target.value)} required={supplierRequired}>
+          <option value="">{supplierRequired ? "Select supplier" : "No preference"}</option>
           {supplierOptions.map((supplier) => (
             <option key={supplier.id} value={supplier.id}>{supplier.name} ({supplier.code})</option>
           ))}
         </select>
-        <small>Suggestion only; Purchase Manager can invite other approved suppliers</small>
+        <small>{supplierRequired ? "Required for Existing Item requests. Purchase Manager can still invite other approved suppliers." : "Suggestion only; Purchase Manager can invite other approved suppliers."}</small>
       </label>
 
       <label className="purchase-field purchase-field-quotation">

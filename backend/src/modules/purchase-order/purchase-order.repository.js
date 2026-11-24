@@ -11,7 +11,7 @@ export async function insertHeader(connection, values) {
 }
 
 export async function insertItem(connection, values) {
-  const [result] = await connection.execute(`INSERT INTO purchase_order_items (tenant_id,purchase_order_id,purchase_request_item_id,line_number,item_id,item_code_snapshot,item_type_snapshot,item_description_snapshot,item_specification_snapshot,uom_code_snapshot,hsn_code_snapshot,ordered_quantity,unit_price,discount_amount,tax_percent,tax_amount,packing_amount,freight_amount,other_charges_amount,line_total_amount,required_date,line_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, values);
+  const [result] = await connection.execute(`INSERT INTO purchase_order_items (tenant_id,purchase_order_id,purchase_request_item_id,line_number,item_id,item_code_snapshot,item_type_snapshot,item_description_snapshot,item_specification_snapshot,other_specification,uom_code_snapshot,hsn_code_snapshot,ordered_quantity,unit_price,discount_amount,tax_percent,tax_amount,packing_amount,freight_amount,other_charges_amount,line_total_amount,required_date,line_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, values);
   return result.insertId;
 }
 
@@ -106,7 +106,18 @@ export async function listSupplierOptions(tenantId) {
 export async function getOrder(id, tenantId, connection = db, lock = false) {
   const [headers] = await connection.execute(`SELECT * FROM purchase_orders WHERE purchase_order_id=? AND tenant_id=? ${lock ? "FOR UPDATE" : ""}`, [Number(id), tenantId]);
   if (!headers[0]) return null;
-  const [items] = await connection.execute(`SELECT * FROM purchase_order_items WHERE purchase_order_id=? AND tenant_id=? ORDER BY line_number`, [Number(id), tenantId]);
+  const [items] = await connection.execute(`SELECT POI.*,COALESCE(I.inspection_required,'N') AS itemInspectionRequired,
+    COALESCE((
+      SELECT SUM(GI.received_quantity)
+      FROM goods_receipt_note_items GI
+      JOIN goods_receipt_notes G ON G.grn_id=GI.grn_id AND G.tenant_id=GI.tenant_id
+      WHERE GI.tenant_id=POI.tenant_id
+        AND GI.purchase_order_item_id=POI.purchase_order_item_id
+        AND G.status IN ('INWARD','INSPECTION_PENDING','INSPECTION_HOLD','ACCEPTED','PARTIALLY_ACCEPTED','READY_FOR_STOCK')
+    ),0) AS grn_inward_quantity
+    FROM purchase_order_items POI
+    LEFT JOIN item_master I ON I.item_id=POI.item_id
+    WHERE POI.purchase_order_id=? AND POI.tenant_id=? ORDER BY POI.line_number`, [Number(id), tenantId]);
   const [sources] = await connection.execute(`SELECT POS.*,PR.pr_number AS prNumber,PR.requisition_type AS requisitionType FROM purchase_order_sources POS LEFT JOIN purchase_requests PR ON PR.purchase_request_id=POS.purchase_request_id AND PR.tenant_id=POS.tenant_id WHERE POS.purchase_order_id=? AND POS.tenant_id=? ORDER BY POS.id`, [Number(id), tenantId]);
   const [history] = await connection.execute(`SELECT * FROM purchase_order_approval_history WHERE purchase_order_id=? AND tenant_id=? ORDER BY performed_at,id`, [Number(id), tenantId]);
   const [attachments] = await connection.execute(`SELECT * FROM purchase_order_attachments WHERE purchase_order_id=? AND tenant_id=? ORDER BY uploaded_at,id`, [Number(id), tenantId]);
@@ -118,7 +129,7 @@ export async function updateHeader(connection, id, tenantId, values) {
 }
 
 export async function updateItem(connection, id, tenantId, values) {
-  await connection.execute(`UPDATE purchase_order_items SET ordered_quantity=?,unit_price=?,discount_amount=?,tax_percent=?,tax_amount=?,packing_amount=?,freight_amount=?,other_charges_amount=?,line_total_amount=?,updated_at=CURRENT_TIMESTAMP WHERE purchase_order_item_id=? AND tenant_id=?`, [...values, Number(id), tenantId]);
+  await connection.execute(`UPDATE purchase_order_items SET ordered_quantity=?,unit_price=?,discount_amount=?,tax_percent=?,tax_amount=?,packing_amount=?,freight_amount=?,other_charges_amount=?,line_total_amount=?,other_specification=?,updated_at=CURRENT_TIMESTAMP WHERE purchase_order_item_id=? AND tenant_id=?`, [...values, Number(id), tenantId]);
 }
 
 export async function setStatus(connection, id, tenantId, status, userCode) {

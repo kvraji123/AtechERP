@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { apiMessage } from "../../../api/client";
 import { purchaseApi } from "../../../api/purchase.api";
 import { useAppFeedback } from "../../../components/AppFeedback";
+import { useReferenceData } from "../../../hooks/useReferenceData";
 import Pagination, { PAGE_SIZE } from "../../../components/Pagination";
 import PurchaseModuleTabs from "./components/PurchaseModuleTabs";
 import PurchaseRequestViewDialog from "./components/PurchaseRequestViewDialog";
@@ -21,7 +22,8 @@ const displayDate = (value?: string | null) => value ? new Date(`${String(value)
 
 export default function CreateRfqQueuePage() {
   const navigate = useNavigate();
-  const { showSuccess } = useAppFeedback();
+  const { confirmAction, showSuccess } = useAppFeedback();
+  const referenceData = useReferenceData([]);
   const [stage, setStage] = useState<"REQUESTS" | "DRAFTS">("REQUESTS");
   const [requests, setRequests] = useState<RfqPurchaseRequest[]>([]);
   const [summary, setSummary] = useState({ total: 0, pending: 0, rfqEligible: 0 });
@@ -84,7 +86,11 @@ export default function CreateRfqQueuePage() {
     catch (loadError) { setDraftError(apiMessage(loadError)); }
   };
   const queueDraft = async (draft: RfqDraft) => {
-    if (!window.confirm(`Add ${draft.enquiryNumber} to the internal email outbox? One pending record will be created for each supplier; no email will be sent yet.`)) return;
+    if (!await confirmAction({
+      title: "Add RFQ to Email Outbox?",
+      message: `One pending record will be created for each supplier for ${draft.enquiryNumber}. No email will be sent yet.`,
+      confirmLabel: "Add to Outbox",
+    })) return;
     setSendingId(draft.id); setDraftError("");
     try {
       await purchaseApi.sendRfq(draft.id);
@@ -125,7 +131,7 @@ export default function CreateRfqQueuePage() {
     {stage === "REQUESTS" ? <div className="purchase-rfq-pr-page">
       <RfqPurchaseRequestDashboard summary={summary} status={status} onStatusChange={(value) => { setStatus(value); setRequestPage(1); }} />
       <section className="purchase-rfq-pr-list"><header><div><h2>Purchase Request List</h2><p>Approved and partially approved PRs can be selected or combined into one RFQ.</p></div><div className="purchase-list-head-actions"><button type="button" className="purchase-secondary-button" onClick={() => navigate("/purchase/rfqs")}><RadioTower size={15} /> View RFQ Tracking</button><span>{selectedIds.length} approved {selectedIds.length === 1 ? "PR" : "PRs"} selected</span><button type="button" className="purchase-primary-button" disabled={!selectedIds.length} onClick={createRfq}><FilePlus2 size={16} /> Create RFQ for Selected PRs ({selectedIds.length})</button></div></header>
-      <RfqPurchaseRequestFilters requests={requests} search={search} status={status} department={department} priority={priority} onSearchChange={(value) => { setSearch(value); setRequestPage(1); }} onStatusChange={(value) => { setStatus(value); setRequestPage(1); }} onDepartmentChange={(value) => { setDepartment(value); setRequestPage(1); }} onPriorityChange={(value) => { setPriority(value); setRequestPage(1); }} onRefresh={() => { void loadRequests(true); }}  pagination={<Pagination page={requestPage} total={requestTotal} onPageChange={setRequestPage} itemLabel="purchase requests" disabled={loading}/>} />
+      <RfqPurchaseRequestFilters requests={requests} departments={referenceData.departments} search={search} status={status} department={department} priority={priority} onSearchChange={(value) => { setSearch(value); setRequestPage(1); }} onStatusChange={(value) => { setStatus(value); setRequestPage(1); }} onDepartmentChange={(value) => { setDepartment(value); setRequestPage(1); }} onPriorityChange={(value) => { setPriority(value); setRequestPage(1); }} onRefresh={() => { void loadRequests(true); }}  pagination={<Pagination page={requestPage} total={requestTotal} onPageChange={setRequestPage} itemLabel="purchase requests" disabled={loading}/>} />
       {error && <div className="marketing-form-alert error" role="alert">{error}</div>}
       {loading ? <div className="purchase-po-approval-empty">Loading purchase requests...</div> : <RfqPurchaseRequestTable requests={filtered} selectedIds={selectedIds} onToggle={(id) => setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])} onToggleAll={(selected) => { const eligibleIds = filtered.filter((request) => (request.status === "APPROVED" || request.status === "PARTIALLY_APPROVED") && request.rfqStatus === "NOT_CREATED").map((request) => request.id); setSelectedIds((current) => selected ? Array.from(new Set([...current, ...eligibleIds])) : current.filter((id) => !eligibleIds.includes(id))); }} onView={setViewRequest} onViewRfqs={(request) => navigate(`/purchase/rfqs?pr=${encodeURIComponent(request.prNumber)}`)} />}
       
@@ -134,7 +140,7 @@ export default function CreateRfqQueuePage() {
     </div> : <section className="purchase-rfq-pr-list purchase-rfq-drafts-list">
       <header className="app-list-toolbar"><div><h2>RFQ Drafts</h2><p>Each saved RFQ has a stored supplier-specific PDF. Adding it to the email outbox does not send an email.</p></div><div className="purchase-list-head-actions"><span>{draftTotal} drafts</span><button type="button" className="purchase-secondary-button" onClick={() => { void loadDrafts(true); }}>Refresh</button><Pagination page={draftPage} total={draftTotal} onPageChange={setDraftPage} itemLabel="RFQ drafts" disabled={draftLoading}/></div></header>
       {draftError && <div className="marketing-form-alert error" role="alert">{draftError}</div>}
-      {draftLoading ? <div className="purchase-po-approval-empty">Loading RFQ drafts...</div> : !drafts.length ? <div className="purchase-po-approval-empty">No RFQ drafts are waiting to be queued.</div> : <div className="purchase-rfq-pr-table-wrap"><table className="purchase-rfq-pr-table purchase-rfq-drafts-table"><thead><tr><th>RFQ Number</th><th>Subject</th><th>RFQ Date</th><th>Due Date</th><th>Suppliers</th><th>Items</th><th>Status</th><th>Action</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.id}><td><strong>{draft.enquiryNumber}</strong></td><td>{draft.subject || "RFQ"}</td><td>{displayDate(draft.enquiryDate)}</td><td>{displayDate(draft.quoteDueDate)}</td><td>{draft.supplierCount}</td><td>{draft.itemCount}</td><td><span className="purchase-rfq-pr-status pending">Draft</span></td><td><div className="purchase-rfq-draft-actions"><button type="button" className="purchase-secondary-button" onClick={() => { void openDraft(draft); }}><Eye size={14} /> View PDF</button><button type="button" className="purchase-primary-button" disabled={sendingId === draft.id} onClick={() => { void queueDraft(draft); }}><Send size={14} /> {sendingId === draft.id ? "Queueing..." : "Add to Outbox"}</button></div></td></tr>)}</tbody></table></div>}
+      {draftLoading ? <div className="purchase-po-approval-empty">Loading RFQ drafts...</div> : !drafts.length ? <div className="purchase-po-approval-empty">No RFQ drafts are waiting to be queued.</div> : <div className="purchase-rfq-pr-table-wrap"><table className="purchase-rfq-pr-table purchase-rfq-drafts-table"><thead><tr><th>RFQ / Purchase Enquiry No.</th><th>Subject</th><th>RFQ Date</th><th>Due Date</th><th>Suppliers</th><th>Items</th><th>Status</th><th>Action</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.id}><td><strong>{draft.enquiryNumber}</strong></td><td>{draft.subject || "RFQ"}</td><td>{displayDate(draft.enquiryDate)}</td><td>{displayDate(draft.quoteDueDate)}</td><td>{draft.supplierCount}</td><td>{draft.itemCount}</td><td><span className="purchase-rfq-pr-status pending">Draft</span></td><td><div className="purchase-rfq-draft-actions"><button type="button" className="purchase-secondary-button" onClick={() => { void openDraft(draft); }}><Eye size={14} /> View PDF</button><button type="button" className="purchase-primary-button" disabled={sendingId === draft.id} onClick={() => { void queueDraft(draft); }}><Send size={14} /> {sendingId === draft.id ? "Queueing..." : "Add to Outbox"}</button></div></td></tr>)}</tbody></table></div>}
       
     </section>}
     <PurchaseRequestViewDialog request={viewRequest} onClose={() => setViewRequest(null)} />

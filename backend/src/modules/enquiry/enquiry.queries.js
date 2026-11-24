@@ -1,6 +1,7 @@
 export const LIST_ENQUIRIES = `
   SELECT
     E.enquiry_id AS enquiryId,
+    E.active_flag AS activeFlag,
     E.doc_no AS docNo,
     E.customer_id AS customerId,
     E.customer_code_snapshot AS customerCode,
@@ -47,6 +48,8 @@ export const LIST_ENQUIRIES = `
     ON P.enquiry_id = E.enquiry_id
     AND P.active_flag = 'Y'
   WHERE
+    E.active_flag = 'Y'
+    AND
     (
       ? = ''
       OR E.doc_no LIKE CONCAT('%', ?, '%')
@@ -70,6 +73,7 @@ export const LIST_ENQUIRIES = `
     /* COLUMN_FILTERS */
   GROUP BY
     E.enquiry_id,
+    E.active_flag,
     E.doc_no,
     E.customer_id,
     E.customer_code_snapshot,
@@ -92,6 +96,8 @@ export const COUNT_ENQUIRIES = `
   SELECT COUNT(*) AS total
   FROM marketing_enquiries E
   WHERE
+    E.active_flag = 'Y'
+    AND
     (
       ? = ''
       OR E.doc_no LIKE CONCAT('%', ?, '%')
@@ -123,31 +129,37 @@ export const LIST_ENQUIRY_FILTER_OPTIONS = `
   FROM (
     SELECT 'docNo' AS filterKey, E.doc_no AS optionValue, E.doc_no AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
     SELECT 'customer' AS filterKey, E.customer_name_snapshot AS optionValue, E.customer_name_snapshot AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
     SELECT 'mode' AS filterKey, E.enquiry_mode AS optionValue, E.enquiry_mode AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
     SELECT 'orderType' AS filterKey, E.order_type AS optionValue, E.order_type AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
     SELECT 'stage' AS filterKey, E.current_stage AS optionValue, E.current_stage AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
     SELECT 'status' AS filterKey, E.enquiry_status AS optionValue, E.enquiry_status AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
@@ -156,7 +168,9 @@ export const LIST_ENQUIRY_FILTER_OPTIONS = `
       COALESCE(NULLIF(P.item_code, ''), NULLIF(P.drawing_number, ''), NULLIF(P.part_number, ''), NULLIF(P.product_description, '')) AS optionValue,
       CONCAT_WS(' · ', NULLIF(P.item_code, ''), NULLIF(P.part_number, ''), NULLIF(P.drawing_number, ''), NULLIF(P.product_description, '')) AS optionLabel
     FROM marketing_enquiry_parts P
+    JOIN marketing_enquiries E ON E.enquiry_id = P.enquiry_id
     WHERE P.active_flag = 'Y'
+      AND E.active_flag = 'Y'
 
     UNION ALL
 
@@ -165,6 +179,7 @@ export const LIST_ENQUIRY_FILTER_OPTIONS = `
       DATE_FORMAT(E.created_on, '%Y-%m-%d') AS optionValue,
       DATE_FORMAT(E.created_on, '%d %b %Y') AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
 
     UNION ALL
 
@@ -173,6 +188,7 @@ export const LIST_ENQUIRY_FILTER_OPTIONS = `
       DATE_FORMAT(COALESCE(E.updated_on, E.submitted_on, E.created_on), '%Y-%m-%d') AS optionValue,
       DATE_FORMAT(COALESCE(E.updated_on, E.submitted_on, E.created_on), '%d %b %Y') AS optionLabel
     FROM marketing_enquiries E
+    WHERE E.active_flag = 'Y'
   ) AS filterOptions
   WHERE optionValue IS NOT NULL
     AND optionValue <> ''
@@ -183,6 +199,7 @@ export const GET_ENQUIRY = `
   SELECT *
   FROM marketing_enquiries
   WHERE enquiry_id = ?
+    AND active_flag = 'Y'
 `;
 
 export const GET_ENQUIRY_PARTS = `
@@ -241,9 +258,12 @@ export const INSERT_ENQUIRY = `
     customer_code_snapshot,
     customer_name_snapshot,
     customer_short_name_snapshot,
+    customer_representative_name,
     enquiry_mode,
     order_type,
     required_date,
+    customer_enquiry_reference,
+    customer_enquiry_date,
     po_reference,
     enquiry_status,
     enquiry_conversion,
@@ -256,7 +276,7 @@ export const INSERT_ENQUIRY = `
     created_by
   )
   VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'YET_TO_RECEIVE',
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'YET_TO_RECEIVE',
     'ENQUIRY', ?, ?, ?, ?, 'Y', ?
   )
 `;
@@ -268,9 +288,12 @@ export const UPDATE_ENQUIRY = `
     customer_code_snapshot = ?,
     customer_name_snapshot = ?,
     customer_short_name_snapshot = ?,
+    customer_representative_name = ?,
     enquiry_mode = ?,
     order_type = ?,
     required_date = ?,
+    customer_enquiry_reference = ?,
+    customer_enquiry_date = ?,
     po_reference = ?,
     revision_number = ?,
     revision_date = ?,
@@ -297,7 +320,6 @@ export const INSERT_ENQUIRY_PART = `
     drawing_revision_date,
     product_description,
     material_and_grade,
-    alternative_material,
     is_assembled_part,
     required_quantity,
     annual_quantity,
@@ -310,7 +332,7 @@ export const INSERT_ENQUIRY_PART = `
     created_by
   )
   VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
     'PENDING_FEASIBILITY', ?, 'Y', ?
   )
 `;
@@ -333,6 +355,20 @@ export const UPDATE_ENQUIRY_STATUS = `
     enquiry_status = ?,
     updated_by = ?
   WHERE enquiry_id = ?
+`;
+
+export const DEACTIVATE_ENQUIRY = `
+  UPDATE marketing_enquiries
+  SET active_flag = 'N', updated_by = ?
+  WHERE enquiry_id = ?
+    AND active_flag = 'Y'
+`;
+
+export const DEACTIVATE_ENQUIRY_PARTS = `
+  UPDATE marketing_enquiry_parts
+  SET active_flag = 'N', updated_by = ?
+  WHERE enquiry_id = ?
+    AND active_flag = 'Y'
 `;
 
 export const ELIGIBLE_QUOTATION_PARTS = `

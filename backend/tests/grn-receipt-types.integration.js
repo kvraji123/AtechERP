@@ -28,13 +28,35 @@ try {
     if (['beginTransaction', 'commit', 'rollback', 'release'].includes(key)) return async () => {};
     const value = target[key]; return typeof value === 'function' ? value.bind(target) : value;
   }});
-  const [[item]] = await connection.query("SELECT item_id FROM item_master WHERE active_flag='Y' LIMIT 1");
+  const [[item]] = await connection.query(`SELECT I.item_id
+    FROM item_master I
+    JOIN item_incoming_inspection_characteristic IC ON IC.item_id=I.item_id
+    WHERE I.active_flag='Y' AND I.inspection_required='Y' AND COALESCE(I.mtc_applicable,'N')='N'
+    GROUP BY I.item_id
+    LIMIT 1`);
   const [[supplier]] = await connection.query("SELECT supplier_id FROM supplier_master WHERE active_flag='Y' LIMIT 1");
   const [[customer]] = await connection.query("SELECT customer_id,customer_name FROM customer_master WHERE active_flag='Y' AND party_type IN ('CUSTOMER','BOTH') LIMIT 1");
   const [[part]] = await connection.query("SELECT part_id,part_number FROM part_master WHERE active_flag='Y' AND part_status='ACTIVE' LIMIT 1");
-  assert.ok(item && supplier && customer && part, 'Active item, supplier, customer and part fixtures required');
+  const [[companyLocation]] = await connection.query(`SELECT warehouse_name,sub_inventory_code,location_name
+    FROM location_master
+    WHERE tenant_id='DEFAULT' AND active_flag='Y' AND warehouse_name <> 'Customer Material Stores'
+    LIMIT 1`);
+  const [[customerLocation]] = await connection.query(`SELECT warehouse_name,sub_inventory_code,location_name
+    FROM location_master
+    WHERE tenant_id='DEFAULT' AND active_flag='Y' AND warehouse_name='Customer Material Stores'
+    LIMIT 1`);
+  assert.ok(item && supplier && customer && part && companyLocation && customerLocation, 'Active item, supplier, customer, part, company location and customer location fixtures required');
+  const [dispositionResult] = await connection.execute(`INSERT INTO rejection_disposition_master
+    (disposition_code,disposition_name,party_action,stock_action,active_flag)
+    VALUES ('TEST_QUARANTINE','Test quarantine','INTERNAL','QUARANTINE','Y')`);
+  const [dimensionReasonResult] = await connection.execute(`INSERT INTO rejection_reason_master
+    (reason_code,reason_name,reason_category,applicable_receipt_types,default_disposition_id,require_remarks,require_attachment,active_flag)
+    VALUES ('DIMENSION_OUT','Dimension out','DIMENSION','ALL',?,'Y','N','Y')`, [dispositionResult.insertId]);
+  const [surfaceDamageReasonResult] = await connection.execute(`INSERT INTO rejection_reason_master
+    (reason_code,reason_name,reason_category,applicable_receipt_types,default_disposition_id,require_remarks,require_attachment,active_flag)
+    VALUES ('SURFACE_DAMAGE','Surface damage','COSMETIC','ALL',?,'Y','Y','Y')`, [dispositionResult.insertId]);
   const user = { tenantId: 'DEFAULT', companyId: null, userCode: 'GRN_TYPE_TEST' };
-  const createGate = (entryType, referenceNumber, party = {}) => gateEntryService.create({ entryType, referenceNumber, ...party, entryDateTime: '2026-09-12 10:00', vehicleNumber: 'TN01TEST', driverName: 'Test Driver', drivingLicenceNumber: 'TEST-LICENSE', action: 'GATE_ENTERED' }, user);
+  const createGate = (entryType, referenceNumber, party = {}) => gateEntryService.create({ entryType, referenceNumber, ...party, entryDateTime: '2026-09-12 10:00', transportMode: 'ROAD', vehicleNumber: 'TN01TEST', driverName: 'Test Driver', drivingLicenceNumber: 'TEST-LICENSE', action: 'GATE_ENTERED' }, user);
   const openGate = await createGate('OPEN_PURCHASE', 'ORDER-TEST', { supplierId: supplier.supplier_id });
   const body = { ...base, gateEntryId: openGate.id, supplierId: supplier.supplier_id, supplierInvoiceNumber: 'TEST-INVOICE', supplierInvoiceDate: '2026-09-12', deliveryChallanNumber: 'TEST-DC', inspectionRequired: false, items: [{ itemId: item.item_id, receivedQuantity: 2.5, directRatePerQty: 0, batchSerialNumber: 'TYPE-TEST' }] };
   const draft = await service.create(body, user);
@@ -51,12 +73,18 @@ try {
   assert.equal(accepted.supplier_id, null);
   assert.equal(accepted.supplier_invoice_number, null);
   assert.equal(Number(accepted.items[0].direct_rate_per_qty), 0);
-  const posting = grn => ({ stockPostingDate: '2026-09-12', receivedBy: 'Test', items: [{ grnItemId: grn.items[0].grn_item_id, warehouseCode: 'TYPE-TEST', binLocation: 'TYPE-TEST', batchSerialNumber: 'TYPE-TEST' }] });
+  const posting = (grn, location = companyLocation) => ({ stockPostingDate: '2026-09-12', receivedBy: 'Test', items: [{
+    grnItemId: grn.items[0].grn_item_id,
+    warehouseCode: location.warehouse_name,
+    subinventoryCode: location.sub_inventory_code,
+    binLocation: location.location_name,
+    batchSerialNumber: 'TYPE-TEST',
+  }] });
   await assert.rejects(service.post(reopened.grn_id, posting(reopened), user), /manager approval/i);
   await assert.rejects(service.approveOpenPurchase(reopened.grn_id, user), /permission/i);
   await service.approveOpenPurchase(reopened.grn_id, { ...user, permissions: ['PO_APPROVE'] });
   await service.post(reopened.grn_id, posting(reopened), user);
-  await service.post(accepted.grn_id, posting(accepted), user);
+  await service.post(accepted.grn_id, posting(accepted, customerLocation), user);
   const outsourcingSuffix = String(Date.now());
   const [definitionResult] = await connection.execute(`INSERT INTO part_process_definition
     (part_id,definition_code,operation_description,source_type,process_cost_inr,active_flag,created_by)
@@ -67,7 +95,7 @@ try {
   const [operationResult] = await connection.execute(`INSERT INTO part_process_operation
     (process_plan_id,process_definition_id,operation_number,operation_description,source_type,process_cost_inr,inspection_required,created_by)
     VALUES (?,?,990,'Outsource finish and inspect','OUTSOURCE',0,'Y',?)`, [planResult.insertId, definitionResult.insertId, user.userCode]);
-  const outsourcingGate = await createGate('OUTSOURCING_PARTS', '', { supplierId: supplier.supplier_id, partId: part.part_id });
+  const outsourcingGate = await createGate('OUTSOURCING_PARTS', 'OUTSOURCE-DC-TEST', { supplierId: supplier.supplier_id, partId: part.part_id });
   const outsourcingBody = {
     receiptType: 'OUTSOURCING_PRODUCT', gateEntryId: outsourcingGate.id, supplierId: supplier.supplier_id,
     grnDate: '2026-09-12', supplierInvoiceNumber: 'OUTSOURCE-INVOICE', supplierInvoiceDate: '2026-09-12',
@@ -94,8 +122,7 @@ try {
   const inspectionGate = await createGate('OPEN_PURCHASE', 'ORDER-INSPECTION', { supplierId: supplier.supplier_id });
   const inspectionDraft = await service.create({ ...body, gateEntryId: inspectionGate.id, inspectionRequired: true, items: [{ itemId: item.item_id, receivedQuantity: 2, directRatePerQty: 0 }] }, user);
   const inspectionInward = await service.update(inspectionDraft.grn_id, { ...body, gateEntryId: inspectionGate.id, action: 'INWARD', inspectionRequired: true, items: [{ itemId: item.item_id, receivedQuantity: 2, directRatePerQty: 0 }] }, user);
-  const [reasonRows] = await connection.query("SELECT rejection_reason_id,default_disposition_id FROM rejection_reason_master WHERE reason_code='DIMENSION_OUT' AND active_flag='Y' LIMIT 1");
-  assert.ok(reasonRows[0], 'Seeded rejection reason fixture is required');
+  const reasonRows = [{ rejection_reason_id: dimensionReasonResult.insertId, default_disposition_id: dispositionResult.insertId }];
   const inspected = await service.inspect(inspectionInward.grn_id, { items: inspectionInward.items.map((line) => ({
     grnItemId: line.grn_item_id, acceptedQuantity: 0, rejectedQuantity: 2, onHoldQuantity: 0,
     rejectionReasonId: reasonRows[0].rejection_reason_id,
@@ -136,8 +163,7 @@ try {
     originalname: 'surface-damage-proof.png', filename: evidenceFile, mimetype: 'image/png', size: 23,
   }, user);
   assert.ok(uploadedAttachment.fileUrl.includes('/uploads/marketing/grn-rejections/'));
-  const [surfaceDamageReasons] = await connection.query("SELECT rejection_reason_id,default_disposition_id FROM rejection_reason_master WHERE reason_code='SURFACE_DAMAGE' AND active_flag='Y' LIMIT 1");
-  assert.ok(surfaceDamageReasons[0], 'Surface-damage rejection reason fixture is required');
+  const surfaceDamageReasons = [{ rejection_reason_id: surfaceDamageReasonResult.insertId, default_disposition_id: dispositionResult.insertId }];
   const rtvInspected = await service.inspect(rtvInward.grn_id, { items: rtvInward.items.map((line) => ({
     grnItemId: line.grn_item_id, acceptedQuantity: 0, rejectedQuantity: 1, onHoldQuantity: 0,
     rejectionReasonId: surfaceDamageReasons[0].rejection_reason_id,
@@ -147,7 +173,7 @@ try {
   })) }, user);
   const [rtvBalances] = await connection.query("SELECT rejection_inventory_balance_id FROM inventory_rejection_balance WHERE tenant_id=? AND grn_id=?", [user.tenantId, rtvInspected.grn_id]);
   const rtvResolution = await inventoryService.resolveRejectionInventory(rtvBalances[0].rejection_inventory_balance_id, {
-    action: 'RETURN_TO_VENDOR', quantity: 1, returnDate: '2026-09-12', dispatchReference: 'RTV-CHALLAN-01', transportReference: 'TN01TEST', remarks: 'Returned to supplier after quality rejection',
+    action: 'RETURN_TO_VENDOR', quantity: 1, returnDate: '2026-09-12', dispatchReference: 'RTV-CHALLAN-01', transportMode: 'ROAD', transportReference: 'TN01TEST', remarks: 'Returned to supplier after quality rejection',
   }, user);
   assert.equal(rtvResolution.status, 'OPEN');
   assert.equal(rtvResolution.rtvDocument?.documentStatus, 'PENDING_APPROVAL');
@@ -180,7 +206,7 @@ try {
   })) }, user);
   const [[customerReturnBalance]] = await connection.query("SELECT rejection_inventory_balance_id FROM inventory_rejection_balance WHERE tenant_id=? AND grn_id=?", [user.tenantId, customerRejected.grn_id]);
   const customerReturn = await inventoryService.resolveRejectionInventory(customerReturnBalance.rejection_inventory_balance_id, {
-    action: 'RETURN_TO_CUSTOMER', quantity: 1, returnDate: '2026-09-12', dispatchReference: 'RTC-DC-01', transportReference: 'TN01TEST', remarks: 'Return customer supplied material',
+    action: 'RETURN_TO_CUSTOMER', quantity: 1, returnDate: '2026-09-12', dispatchReference: 'RTC-DC-01', transportMode: 'ROAD', transportReference: 'TN01TEST', remarks: 'Return customer supplied material',
   }, user);
   const customerReturnDocument = customerReturn.returnToCustomerDocument;
   assert.equal(customerReturnDocument.documentStatus, 'PENDING_APPROVAL');
@@ -235,10 +261,19 @@ try {
   generatedResolutionPaths.push(path.resolve(env.uploadRoot, approvedScrap.filePath));
   const executedScrap = await inventoryService.executeRejectionResolution(scrapRequest.resolutionRequest.resolutionRequestId, { executionReference: 'SCRAP-CERT-01' }, user);
   assert.equal(executedScrap.resolutionStatus, 'EXECUTED');
-  const [balances] = await connection.query("SELECT stock_owner_type,stock_owner_id,quantity_on_hand FROM inventory_stock_balance WHERE tenant_id='DEFAULT' AND warehouse_code='TYPE-TEST' AND bin_location='TYPE-TEST' AND item_id=?", [item.item_id]);
-  assert.equal(balances.find(b => b.stock_owner_type === 'COMPANY').quantity_on_hand, 2.5);
-  assert.equal(balances.find(b => b.stock_owner_type === 'CUSTOMER').quantity_on_hand, 3);
-  const otherCustomerBalance = await repository.upsertInventoryBalance(connection, ['DEFAULT', null, '', item.item_id, 'TYPE-TEST', 'TYPE-TEST', 'TYPE-TEST', 7, 'TEST', 'TEST'], 'CUSTOMER', Number(customer.customer_id) + 100000);
+  const [[companyBalance]] = await connection.query(`SELECT quantity_on_hand FROM inventory_stock_balance
+    WHERE tenant_id='DEFAULT' AND warehouse_code=? AND sub_inventory_code=? AND bin_location=?
+      AND item_id=? AND stock_owner_type='COMPANY'`, [companyLocation.warehouse_name, companyLocation.sub_inventory_code, companyLocation.location_name, item.item_id]);
+  const [[customerBalance]] = await connection.query(`SELECT quantity_on_hand FROM inventory_stock_balance
+    WHERE tenant_id='DEFAULT' AND warehouse_code=? AND sub_inventory_code=? AND bin_location=?
+      AND item_id=? AND stock_owner_type='CUSTOMER' AND stock_owner_id=?`, [customerLocation.warehouse_name, customerLocation.sub_inventory_code, customerLocation.location_name, item.item_id, customer.customer_id]);
+  assert.equal(Number(companyBalance.quantity_on_hand), 2.5);
+  assert.equal(Number(customerBalance.quantity_on_hand), 3);
+  const otherCustomerBalance = await repository.upsertInventoryBalance(connection, [
+    'DEFAULT', null, '', item.item_id,
+    companyLocation.warehouse_name, companyLocation.sub_inventory_code, companyLocation.location_name,
+    'AVAILABLE', 'TEST', '', 7, 'TEST', 'TEST',
+  ], 'CUSTOMER', Number(customer.customer_id) + 100000);
   assert.equal(otherCustomerBalance.quantityOnHand, 7);
   await assert.rejects(service.post(accepted.grn_id, posting(accepted), user), /Only accepted/);
   console.log('GRN receipt types: draft reopen, direct receipt, posting, owner isolation and validation passed (rolled back).');

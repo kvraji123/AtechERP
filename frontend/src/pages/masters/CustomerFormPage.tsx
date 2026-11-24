@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Building2,
   ExternalLink,
+  Pencil,
   Plus,
   Save,
   Send,
@@ -20,6 +21,7 @@ import {
 import {
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import { customerApi } from "../../api/customer.api";
 import { attachmentApi, type StoredAttachment } from "../../api/attachment.api";
@@ -31,6 +33,7 @@ import {
 } from "../../api/location.api";
 import Alert from "../../components/Alert";
 import { useAppFeedback } from "../../components/AppFeedback";
+import { useAuth } from "../../context/AuthContext";
 import TransportModeMultiSelect from "../../components/TransportModeMultiSelect";
 import "./CustomerFormPage.css";
 type CustomerAttachmentType =
@@ -50,7 +53,6 @@ type CustomerAttachment = {
 };
 
 type CustomerFormData = {
-  customerType: string;
   customerCode: string;
   customerName: string;
   plantCode: string;
@@ -116,8 +118,12 @@ function storedAttachments(attachments: StoredAttachment[]): CustomerAttachment[
     : [createAttachment()];
 }
 
+const usesIndianPostalCode = (country: string) => {
+  const normalizedCountry = country.trim().toUpperCase();
+  return !normalizedCountry || normalizedCountry === "INDIA" || normalizedCountry === "IN";
+};
+
 const initialForm: CustomerFormData = {
-  customerType: "",
   customerCode: "Auto Generated",
   customerName: "",
   plantCode: "",
@@ -167,11 +173,18 @@ export default function CustomerFormPage() {
     "RECORD_STATUS", "INVOICE_TYPE", "CURRENCY", "CUSTOMER_ATTACHMENT_TYPE", "PAYMENT_TERM", "DELIVERY_TERM", "TRANSPORT_MODE",
   ]);
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { confirmDelete } = useAppFeedback();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const customerId = Number(id || 0);
 
   const isEditMode = customerId > 0;
+  const isReadOnly = isEditMode && searchParams.get("mode") === "view";
+  const isAdministrator = String(user?.roleName || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_") === "ADMINISTRATOR";
 
   const [form, setForm] =
     useState<CustomerFormData>(initialForm);
@@ -188,8 +201,10 @@ export default function CustomerFormPage() {
   const [cityLookupError, setCityLookupError] = useState("");
   const [citySelected, setCitySelected] = useState(false);
   const [activeCityIndex, setActiveCityIndex] = useState(-1);
+  const indianCustomer = usesIndianPostalCode(form.country);
+  const postalCodeLabel = indianCustomer ? "Pin Code" : "Postal / ZIP Code";
 
-  const unsaved = useUnsavedChanges(form);
+  const unsaved = useUnsavedChanges(form, undefined, !isReadOnly);
 
   useEffect(() => {
     if (!customerId) {
@@ -208,7 +223,6 @@ export default function CustomerFormPage() {
         const data = response?.data ?? {};
 
         setForm({
-          customerType: String(data.customer_type ?? data.customerType ?? "").toUpperCase(),
           customerCode: data.customer_code ?? data.customerCode ?? "",
           customerName: data.customer_name ?? data.customerName ?? "",
           plantCode: data.plant_code ?? data.plantCode ?? "",
@@ -446,45 +460,35 @@ export default function CustomerFormPage() {
   const validate = (
     action: "DRAFT" | "SUBMIT"
   ) => {
+    if (action === "DRAFT") return true;
+
     if (!form.customerName.trim()) {
       setError("Customer name is required.");
-      return false;
-    }
-
-    if (action === "DRAFT") {
-      return true;
-    }
-
-    if (!form.customerType) {
-      setError("Customer type is required.");
       return false;
     }
 
     const requiredFields: Array<[string, string]> = [
       [form.billingAddress, "Billing address"],
       [form.deliveryAddress, "Delivery address"],
-      [form.pinCode, "Pin code"],
+      [form.pinCode, postalCodeLabel],
       [form.city, "City"],
       [form.state, "State"],
       [form.country, "Country"],
-      [form.gstNo, "GST number"],
-      [form.accountNumber, "Account number"],
-      [form.accountName, "Account name"],
-      [form.bankName, "Bank name"],
-      [form.branchName, "Branch name"],
-      [form.ifscCode, "IFSC code"],
     ];
+    if (indianCustomer) requiredFields.splice(6, 0, [form.gstNo, "GST number"]);
     const missingField = requiredFields.find(([value]) => !value.trim());
     if (missingField) {
       setError(`${missingField[1]} is required.`);
       return false;
     }
 
-    if (
-      form.pinCode &&
-      !/^\d{6}$/.test(form.pinCode)
-    ) {
+    if (indianCustomer && form.pinCode && !/^\d{6}$/.test(form.pinCode)) {
       setError("Enter a valid 6 digit pin code.");
+      return false;
+    }
+
+    if (!indianCustomer && form.pinCode && !/^[A-Za-z0-9]{3,10}$/.test(form.pinCode)) {
+      setError("Enter a valid Postal / ZIP code using 3 to 10 letters or numbers.");
       return false;
     }
 
@@ -504,6 +508,12 @@ export default function CustomerFormPage() {
   const saveCustomer = async (
     action: "DRAFT" | "SUBMIT"
   ) => {
+    if (isReadOnly) return;
+    if (action === "SUBMIT" && !isAdministrator) {
+      setMessage("");
+      setError("Only administrators can submit Customer Masters. You can save this record as a draft.");
+      return;
+    }
     if (!validate(action)) {
       return;
     }
@@ -514,7 +524,7 @@ export default function CustomerFormPage() {
       setMessage("");
 
       const payload = {
-        customerType: form.customerType,
+        action,
         customerCode: isEditMode ? form.customerCode : null,
         customerName: form.customerName.trim(),
         plantCode: form.plantCode.trim() || null,
@@ -560,7 +570,7 @@ export default function CustomerFormPage() {
 
       if (!savedId) throw new Error("Customer was saved but its identifier was not returned.");
 
-      if (savedId && (isEditMode || form.customerStatus === "INACTIVE")) {
+      if (action === "SUBMIT" && savedId && (isEditMode || form.customerStatus === "INACTIVE")) {
         await customerApi.changeStatus(
           savedId,
           form.customerStatus as "ACTIVE" | "INACTIVE"
@@ -584,15 +594,19 @@ export default function CustomerFormPage() {
         return null;
       }));
       const nextAttachments = storedAttachments(savedAttachments.filter((attachment): attachment is StoredAttachment => Boolean(attachment)));
-      const nextForm = { ...form, attachments: nextAttachments };
       setForm((current) => ({ ...current, attachments: nextAttachments }));
 
-      unsaved.markSavedValue(nextForm); setMessage(response?.message ?? "Customer saved successfully.");
+      unsaved.markSaved();
+      setMessage(response?.message ?? "Customer saved successfully.");
 
       if (action === "SUBMIT") {
         window.setTimeout(() => {
           navigate("/masters/customers");
         }, 700);
+      } else if (!isEditMode) {
+        // Keep subsequent draft saves on this persisted record. Remaining on
+        // /new would issue another POST and create a duplicate customer.
+        navigate(`/masters/customers/${savedId}`, { replace: true });
       }
     } catch (saveError) {
       setError(apiMessage(saveError));
@@ -605,6 +619,12 @@ export default function CustomerFormPage() {
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
+    if (isReadOnly) return;
+    if (!isAdministrator) {
+      setMessage("");
+      setError("Only administrators can submit Customer Masters. You can save this record as a draft.");
+      return;
+    }
     void saveCustomer("SUBMIT");
   };
 
@@ -614,7 +634,9 @@ export default function CustomerFormPage() {
         <div className="master-form-title-group">
           <Building2 size={22} />
           <h1>
-            {isEditMode
+            {isReadOnly
+              ? "View Customer"
+              : isEditMode
               ? "Edit Customer"
               : "Create Customer"}
           </h1>
@@ -629,10 +651,17 @@ export default function CustomerFormPage() {
             }
           >
             <ArrowLeft size={15} />
-            Cancel
+            {isReadOnly ? "Back" : "Cancel"}
           </button>
 
-          <button
+          {isReadOnly ? <button
+            type="button"
+            className="primary-action-button"
+            onClick={() => navigate(`/masters/customers/${customerId}?mode=edit`)}
+          >
+            <Pencil size={17} />
+            Edit Customer
+          </button> : <><button
             type="button"
             className="secondary-action-button draft"
             disabled={saving !== null}
@@ -651,16 +680,20 @@ export default function CustomerFormPage() {
             type="submit"
             form="customer-master-form"
             className="primary-action-button"
-            disabled={saving !== null}
+            disabled={saving !== null || !isAdministrator}
+            title={isAdministrator ? undefined : "Only administrators can submit Customer Masters"}
           >
             <Send size={17} />
 
             {saving === "SUBMIT"
               ? "Saving..."
+              : !isAdministrator
+                ? "Submit (Admin only)"
               : isEditMode
                 ? "Update"
                 : "Submit"}
           </button>
+          </>}
         </div>
       </section>
 
@@ -678,6 +711,7 @@ export default function CustomerFormPage() {
         className="master-entry-form"
         onSubmit={handleSubmit}
       >
+        <fieldset className="master-read-only-fields" disabled={isReadOnly}>
         <section className="master-form-section">
           <div className="master-section-header">
             <div>
@@ -689,13 +723,6 @@ export default function CustomerFormPage() {
           </div>
 
           <div className="master-form-grid">
-            <label className="master-field">
-              <span>Customer Type<b>*</b>
-              </span>
-
-              <select name="customerType" value={form.customerType} onChange={handleChange}><option value="">Select customer type</option><option value="OEM">OEM</option><option value="OTHERS">Others</option></select>
-            </label>
-
             <label className="master-field">
               <span>Customer Code</span>
 
@@ -827,14 +854,14 @@ export default function CustomerFormPage() {
             <label className="master-field"><span>Transport Modes</span><TransportModeMultiSelect options={referenceData.options("TRANSPORT_MODE")} value={form.transportModes} onChange={(transportModes) => setForm((current) => ({ ...current, transportModes }))} /></label>
 
             <label className="master-field">
-              <span>Pin Code <b>*</b></span>
+              <span>{postalCodeLabel} <b>*</b></span>
 
               <input
                 name="pinCode"
                 value={form.pinCode}
                 onChange={handleChange}
-                maxLength={6}
-                inputMode="numeric"
+                maxLength={indianCustomer ? 6 : 10}
+                inputMode={indianCustomer ? "numeric" : "text"}
               />
             </label>
 
@@ -965,7 +992,7 @@ export default function CustomerFormPage() {
 
           <div className="master-form-grid">
             <label className="master-field span-2">
-              <span>GST Number <b>*</b></span>
+              <span>GST Number {indianCustomer && <b>*</b>}</span>
 
               <input
                 name="gstNo"
@@ -1105,14 +1132,14 @@ export default function CustomerFormPage() {
             <div>
               <h2>Bank Details</h2>
               <p>
-                Payment and account information.
+                Optional payment and account information.
               </p>
             </div>
           </div>
 
           <div className="master-form-grid">
             <label className="master-field">
-              <span>Account Number <b>*</b></span>
+              <span>Account Number</span>
 
               <input
                 name="accountNumber"
@@ -1122,7 +1149,7 @@ export default function CustomerFormPage() {
             </label>
 
             <label className="master-field">
-              <span>Account Name <b>*</b></span>
+              <span>Account Name</span>
 
               <input
                 name="accountName"
@@ -1132,7 +1159,7 @@ export default function CustomerFormPage() {
             </label>
 
             <label className="master-field">
-              <span>Bank Name <b>*</b></span>
+              <span>Bank Name</span>
 
               <input
                 name="bankName"
@@ -1142,7 +1169,7 @@ export default function CustomerFormPage() {
             </label>
 
             <label className="master-field">
-              <span>Branch Name <b>*</b></span>
+              <span>Branch Name</span>
 
               <input
                 name="branchName"
@@ -1152,7 +1179,7 @@ export default function CustomerFormPage() {
             </label>
 
             <label className="master-field">
-              <span>IFSC Code <b>*</b></span>
+              <span>IFSC Code</span>
 
               <input
                 name="ifscCode"
@@ -1271,6 +1298,7 @@ export default function CustomerFormPage() {
             )}
           </div>
         </section>
+        </fieldset>
       </form>
     </div>
   );

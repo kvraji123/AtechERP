@@ -1,4 +1,4 @@
-import{useEffect,useState}from"react";
+import{Suspense,useEffect,useState}from"react";
 import{Outlet,useLocation}from"react-router-dom";
 import{AppFeedbackProvider}from"../components/AppFeedback";
 import Sidebar from"./Sidebar";
@@ -16,4 +16,4 @@ export default function AppLayout(){
         document.addEventListener("keydown",preventNumberArrowChange,true);
         return()=>document.removeEventListener("keydown",preventNumberArrowChange,true);
     },[location.pathname]);
-    return <AppFeedbackProvider><div className="app-shell"><Sidebar mobileOpen={open} onClose={()=>setOpen(false)}/><main className="app-main-area"><Topbar onMenuClick={()=>setOpen(true)}/><div className="app-content"><Outlet/></div></main></div></AppFeedbackProvider>}
+    return <AppFeedbackProvider><div className="app-shell"><Sidebar mobileOpen={open} onClose={()=>setOpen(false)}/><main className="app-main-area"><Topbar onMenuClick={()=>setOpen(true)}/><div className="app-content"><Suspense fallback={<div className="app-route-loading" role="status" aria-live="polite">Loading page…</div>}><Outlet/></Suspense></div></main></div></AppFeedbackProvider>}

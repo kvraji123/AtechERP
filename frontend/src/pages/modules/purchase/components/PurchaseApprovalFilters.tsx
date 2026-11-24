@@ -18,11 +18,12 @@ type PurchaseApprovalFiltersProps = { pagination?: ReactNode;
   value: ApprovalFilters;
   requests: PurchaseApprovalRequest[];
   suppliers: ApprovalSupplierOption[];
+  departments: Array<{ departmentCode: string; departmentName: string }>;
   onChange: (value: ApprovalFilters) => void;
   onRefresh: () => void;
 };
 
-export default function PurchaseApprovalFilters({ pagination,  value, requests, suppliers, onChange, onRefresh }: PurchaseApprovalFiltersProps) {
+export default function PurchaseApprovalFilters({ pagination,  value, requests, suppliers, departments, onChange, onRefresh }: PurchaseApprovalFiltersProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const update = (key: keyof ApprovalFilters, fieldValue: string) => onChange({ ...value, [key]: fieldValue });
@@ -56,7 +57,7 @@ export default function PurchaseApprovalFilters({ pagination,  value, requests, 
         <option value="ALL">All Plants</option><option>Plant 1</option><option>Plant 2</option><option>Plant 3</option>
       </select>
       <select value={value.department} onChange={(event) => update("department", event.target.value)} aria-label="Filter by department">
-        <option value="ALL">All Departments</option><option>Assembly</option><option>Maintenance</option><option>Machine Shop</option><option>Quality</option>
+        <option value="ALL">All Departments</option>{departments.map((department) => <option key={department.departmentCode} value={department.departmentName}>{department.departmentName}</option>)}
       </select>
       <select value={value.supplier} onChange={(event) => update("supplier", event.target.value)} aria-label="Filter by preferred supplier">
         <option value="ALL">All Preferred Suppliers</option>

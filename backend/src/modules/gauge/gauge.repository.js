@@ -16,9 +16,23 @@ function gaugeConditionSql() {
   END`;
 }
 
+function effectiveOperationalStatusSql() {
+  return `CASE
+    WHEN GM.operational_status IN ('AVAILABLE','ISSUED')
+      AND DATEDIFF(GM.calibration_due_date,CURDATE()) < 0 THEN 'CALIBRATION_EXPIRED'
+    ELSE GM.operational_status
+  END`;
+}
+
 function listWhere(filters) {
   const search = String(filters.search || "").trim();
+  const gaugeId = String(filters.gaugeId || "").trim();
+  const instrument = String(filters.instrument || "").trim();
+  const grnNumber = String(filters.grnNumber || "").trim();
+  const calibrationDueDate = String(filters.calibrationDueDate || "").trim();
+  const location = String(filters.location || "").trim();
   const operationalStatus = String(filters.operationalStatus || "").trim().toUpperCase();
+  const lifecycleStatus = String(filters.lifecycleStatus || "").trim().toUpperCase();
   const calibrationCondition = String(filters.calibrationCondition || "").trim().toUpperCase();
   const clauses = ["GM.tenant_id=?"];
   const params = [filters.tenantId];
@@ -27,9 +41,33 @@ function listWhere(filters) {
     clauses.push("(GM.gauge_id LIKE ? OR GM.instrument_name_snapshot LIKE ? OR GM.item_code_snapshot LIKE ? OR GM.manufacturer_serial_number LIKE ? OR G.grn_number LIKE ? OR GM.current_location LIKE ?)");
     params.push(term, term, term, term, term, term);
   }
+  if (gaugeId) {
+    clauses.push("GM.gauge_id LIKE ?");
+    params.push(`%${gaugeId}%`);
+  }
+  if (instrument) {
+    clauses.push("(GM.instrument_name_snapshot LIKE ? OR GM.item_code_snapshot LIKE ?)");
+    params.push(`%${instrument}%`, `%${instrument}%`);
+  }
+  if (grnNumber) {
+    clauses.push("G.grn_number LIKE ?");
+    params.push(`%${grnNumber}%`);
+  }
+  if (calibrationDueDate) {
+    clauses.push("GM.calibration_due_date=?");
+    params.push(calibrationDueDate);
+  }
+  if (location) {
+    clauses.push("(GM.current_location LIKE ? OR GM.assigned_to LIKE ?)");
+    params.push(`%${location}%`, `%${location}%`);
+  }
   if (operationalStatus) {
-    clauses.push("GM.operational_status=?");
+    clauses.push(`${effectiveOperationalStatusSql()}=?`);
     params.push(operationalStatus);
+  }
+  if (lifecycleStatus) {
+    clauses.push("GM.operational_status=?");
+    params.push(lifecycleStatus);
   }
   if (calibrationCondition) {
     clauses.push(`${gaugeConditionSql()}=?`);
@@ -86,6 +124,16 @@ export async function getRegistrationStockForUpdate(connection, source) {
       AND warehouse_code=? AND bin_location=? AND stock_owner_type='COMPANY'
     FOR UPDATE`, [source.tenantId,source.itemId,source.plantId || '',source.warehouseCode,source.binLocation]);
   return rows.reduce((total, row) => total + Number(row.quantityOnHand || 0), 0);
+}
+
+export async function hasActiveCalibrationSupplier(connection, supplierName) {
+  const [rows] = await connection.execute(`SELECT COUNT(*) AS total
+    FROM supplier_master
+    WHERE supplier_name=?
+      AND active_flag='Y'
+      AND COALESCE(save_status,'SUBMITTED')='SUBMITTED'
+      AND supplier_category='CALIBRATION'`, [String(supplierName).trim()]);
+  return Number(rows[0]?.total || 0) > 0;
 }
 
 export async function getRegistrationSourceForUpdate(connection, tenantId, grnItemId) {
@@ -180,7 +228,7 @@ export async function getCalibrationWorkflowSummary(tenantId, connection = db) {
       AND DATEDIFF(GM.calibration_due_date,CURDATE()) < 0 THEN 1 ELSE 0 END) AS collectionOverdueCount,
     SUM(CASE WHEN GM.operational_status='COLLECTED_FOR_CALIBRATION' THEN 1 ELSE 0 END) AS dispatchQueueCount,
     SUM(CASE WHEN GM.operational_status='UNDER_CALIBRATION' THEN 1 ELSE 0 END) AS underCalibrationCount,
-    SUM(CASE WHEN GM.operational_status='REJECTED' THEN 1 ELSE 0 END) AS rejectedCount
+    SUM(CASE WHEN GM.operational_status IN ('REJECTED','UNDER_SERVICE') THEN 1 ELSE 0 END) AS serviceCount
     FROM gauge_master GM
     WHERE GM.tenant_id=? AND GM.active_flag='Y'`, [tenantId]);
   const summary = rows[0] || {};
@@ -189,19 +237,20 @@ export async function getCalibrationWorkflowSummary(tenantId, connection = db) {
     collectionOverdue: Number(summary.collectionOverdueCount || 0),
     ready: Number(summary.dispatchQueueCount || 0),
     calibration: Number(summary.underCalibrationCount || 0),
-    service: Number(summary.rejectedCount || 0),
+    service: Number(summary.serviceCount || 0),
   };
 }
 
 export async function insertMovementBatch(connection, batch) {
   const [result] = await connection.execute(`INSERT INTO gauge_movement_batches
     (tenant_id,movement_number,movement_type,movement_date,issued_to,calibration_agency,service_purchase_order_id,
-     service_po_number_snapshot,challan_number,expected_return_date,courier_reference,location_name,remarks,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+     service_po_number_snapshot,challan_number,expected_return_date,courier_reference,source_calibration_dispatch_id,
+     material_outward_document_id,gate_entry_id,location_name,remarks,created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
     batch.tenantId,batch.movementNumber,batch.movementType,batch.movementDate,batch.issuedTo || null,
     batch.calibrationAgency || null,batch.servicePurchaseOrderId || null,batch.servicePoNumber || null,
     batch.challanNumber || null,batch.expectedReturnDate || null,batch.courierReference || null,
-    batch.locationName,batch.remarks || null,batch.createdBy,
+    batch.sourceCalibrationDispatchId || null,batch.materialOutwardDocumentId || null,batch.gateEntryId || null,batch.locationName,batch.remarks || null,batch.createdBy,
   ]);
   return Number(result.insertId);
 }
@@ -235,12 +284,17 @@ export async function listCalibrationDispatches(filters = {}) {
     B.courier_reference AS courierReference,B.dispatch_status AS dispatchStatus,
     B.location_name AS dispatchLocation,B.remarks,
     B.created_at AS lastUpdated,
-    COUNT(H.gauge_history_id) AS gaugeCount,
-    GROUP_CONCAT(GM.gauge_id ORDER BY GM.gauge_id SEPARATOR ', ') AS gaugeIds
+    COUNT(DISTINCT H.gauge_history_id) AS gaugeCount,
+    COUNT(DISTINCT RH.gauge_master_id) AS returnedGaugeCount,
+    GROUP_CONCAT(DISTINCT GM.gauge_id ORDER BY GM.gauge_id SEPARATOR ', ') AS gaugeIds
     FROM gauge_movement_batches B
     LEFT JOIN gauge_history H ON H.gauge_movement_batch_id=B.gauge_movement_batch_id
       AND H.tenant_id=B.tenant_id AND H.event_type='CALIBRATION_DISPATCHED'
     LEFT JOIN gauge_master GM ON GM.gauge_master_id=H.gauge_master_id AND GM.tenant_id=B.tenant_id
+    LEFT JOIN gauge_movement_batches RB ON RB.source_calibration_dispatch_id=B.gauge_movement_batch_id
+      AND RB.tenant_id=B.tenant_id AND RB.movement_type='CALIBRATION_RETURN'
+    LEFT JOIN gauge_history RH ON RH.gauge_movement_batch_id=RB.gauge_movement_batch_id
+      AND RH.tenant_id=B.tenant_id AND RH.event_type='CALIBRATION_RETURNED'
     WHERE B.tenant_id=? AND B.movement_type='CALIBRATION_DISPATCH'
     GROUP BY B.gauge_movement_batch_id
     ORDER BY B.created_at DESC,B.gauge_movement_batch_id DESC
@@ -265,11 +319,94 @@ export async function getCalibrationDispatch(calibrationDispatchId, tenantId, co
   const [items] = await connection.execute(`SELECT H.gauge_history_id AS gaugeHistoryId,H.gauge_master_id AS gaugeMasterId,
     GM.gauge_id AS gaugeId,GM.instrument_name_snapshot AS instrumentName,
     GM.manufacturer_serial_number AS manufacturerSerialNumber,H.location_name AS dispatchedTo,
-    H.event_date AS dispatchDate,H.operational_status AS operationalStatus
+    H.event_date AS dispatchDate,GM.operational_status AS operationalStatus,
+    CR.gaugeHistoryId AS calibrationReturnHistoryId,CR.calibrationReturnId,
+    CR.returnGrnNumber,CR.returnDate,CR.returnLocation,CR.calibrationResult,CR.calibrationDueDate,
+    CR.certificateNumber,CR.returnRemarks
     FROM gauge_history H
     JOIN gauge_master GM ON GM.gauge_master_id=H.gauge_master_id AND GM.tenant_id=H.tenant_id
+    LEFT JOIN (
+      SELECT RH.tenant_id AS tenantId,RH.gauge_master_id AS gaugeMasterId,
+        RB.source_calibration_dispatch_id AS calibrationDispatchId,
+        RH.gauge_history_id AS gaugeHistoryId,RB.gauge_movement_batch_id AS calibrationReturnId,
+        RB.movement_number AS returnGrnNumber,RB.movement_date AS returnDate,RB.location_name AS returnLocation,
+        RH.calibration_result AS calibrationResult,RH.calibration_due_date AS calibrationDueDate,
+        RH.certificate_number AS certificateNumber,RH.remarks AS returnRemarks
+      FROM gauge_history RH
+      JOIN gauge_movement_batches RB ON RB.tenant_id=RH.tenant_id AND RB.gauge_movement_batch_id=RH.gauge_movement_batch_id
+      WHERE RH.event_type='CALIBRATION_RETURNED' AND RB.movement_type='CALIBRATION_RETURN'
+    ) CR ON CR.tenantId=H.tenant_id AND CR.gaugeMasterId=H.gauge_master_id
+      AND CR.calibrationDispatchId=H.gauge_movement_batch_id
     WHERE H.tenant_id=? AND H.gauge_movement_batch_id=? AND H.event_type='CALIBRATION_DISPATCHED'
     ORDER BY GM.gauge_id`, [tenantId, Number(calibrationDispatchId)]);
+  const [returns] = await connection.execute(`SELECT RB.gauge_movement_batch_id AS calibrationReturnId,
+    RB.movement_number AS returnGrnNumber,RB.movement_date AS returnDate,RB.location_name AS returnLocation,
+    RB.remarks,COUNT(RH.gauge_history_id) AS gaugeCount
+    FROM gauge_movement_batches RB
+    LEFT JOIN gauge_history RH ON RH.tenant_id=RB.tenant_id AND RH.gauge_movement_batch_id=RB.gauge_movement_batch_id
+      AND RH.event_type='CALIBRATION_RETURNED'
+    WHERE RB.tenant_id=? AND RB.source_calibration_dispatch_id=? AND RB.movement_type='CALIBRATION_RETURN'
+    GROUP BY RB.gauge_movement_batch_id
+    ORDER BY RB.movement_date,RB.gauge_movement_batch_id`, [tenantId, Number(calibrationDispatchId)]);
+  return { ...headers[0], items, returns };
+}
+
+export async function getCalibrationDispatchForUpdate(connection, calibrationDispatchId, tenantId) {
+  const [rows] = await connection.execute(`SELECT gauge_movement_batch_id AS calibrationDispatchId,
+    movement_number AS dispatchNumber,challan_number AS challanNumber,movement_date AS dispatchDate,
+    calibration_agency AS calibrationAgency,dispatch_status AS dispatchStatus
+    FROM gauge_movement_batches
+    WHERE tenant_id=? AND gauge_movement_batch_id=? AND movement_type='CALIBRATION_DISPATCH'
+    FOR UPDATE`, [tenantId, Number(calibrationDispatchId)]);
+  return rows[0] || null;
+}
+
+export async function listCalibrationDispatchGaugeIds(connection, calibrationDispatchId, tenantId) {
+  const [rows] = await connection.execute(`SELECT gauge_master_id AS gaugeMasterId
+    FROM gauge_history
+    WHERE tenant_id=? AND gauge_movement_batch_id=? AND event_type='CALIBRATION_DISPATCHED'`,
+  [tenantId, Number(calibrationDispatchId)]);
+  return rows.map((row) => Number(row.gaugeMasterId));
+}
+
+export async function countCalibrationDispatchReturnedGauges(connection, calibrationDispatchId, tenantId) {
+  const [rows] = await connection.execute(`SELECT COUNT(DISTINCT H.gauge_master_id) AS returnedGaugeCount
+    FROM gauge_movement_batches RB
+    JOIN gauge_history H ON H.tenant_id=RB.tenant_id AND H.gauge_movement_batch_id=RB.gauge_movement_batch_id
+      AND H.event_type='CALIBRATION_RETURNED'
+    WHERE RB.tenant_id=? AND RB.source_calibration_dispatch_id=? AND RB.movement_type='CALIBRATION_RETURN'`,
+  [tenantId, Number(calibrationDispatchId)]);
+  return Number(rows[0]?.returnedGaugeCount || 0);
+}
+
+export async function updateCalibrationDispatchStatus(connection, calibrationDispatchId, tenantId, dispatchStatus) {
+  await connection.execute(`UPDATE gauge_movement_batches SET dispatch_status=?
+    WHERE tenant_id=? AND gauge_movement_batch_id=? AND movement_type='CALIBRATION_DISPATCH'`,
+  [dispatchStatus, tenantId, Number(calibrationDispatchId)]);
+}
+
+export async function getCalibrationReturn(calibrationReturnId, tenantId, connection = db) {
+  const [headers] = await connection.execute(`SELECT RB.gauge_movement_batch_id AS calibrationReturnId,
+    RB.movement_number AS returnGrnNumber,RB.movement_date AS returnDate,RB.location_name AS returnLocation,
+    RB.calibration_agency AS calibrationAgency,RB.remarks,RB.source_calibration_dispatch_id AS calibrationDispatchId,
+    DB.movement_number AS dispatchNumber,DB.challan_number AS challanNumber
+    FROM gauge_movement_batches RB
+    JOIN gauge_movement_batches DB ON DB.tenant_id=RB.tenant_id
+      AND DB.gauge_movement_batch_id=RB.source_calibration_dispatch_id
+    WHERE RB.tenant_id=? AND RB.gauge_movement_batch_id=? AND RB.movement_type='CALIBRATION_RETURN'`,
+  [tenantId, Number(calibrationReturnId)]);
+  if (!headers[0]) return null;
+  const [items] = await connection.execute(`SELECT H.gauge_history_id AS gaugeHistoryId,H.gauge_master_id AS gaugeMasterId,
+    GM.gauge_id AS gaugeId,GM.instrument_name_snapshot AS instrumentName,H.calibration_result AS calibrationResult,
+    H.event_date AS calibrationDate,H.calibration_due_date AS calibrationDueDate,H.certificate_number AS certificateNumber,
+    H.certificate_file_name AS certificateFileName,H.certificate_file_path AS certificateFilePath,
+    H.certificate_file_size_bytes AS certificateFileSizeBytes,
+    CASE WHEN H.certificate_file_path IS NULL THEN NULL ELSE CONCAT('/uploads/',REPLACE(H.certificate_file_path,'\\\\','/')) END AS certificateFileUrl,
+    H.remarks
+    FROM gauge_history H
+    JOIN gauge_master GM ON GM.gauge_master_id=H.gauge_master_id AND GM.tenant_id=H.tenant_id
+    WHERE H.tenant_id=? AND H.gauge_movement_batch_id=? AND H.event_type='CALIBRATION_RETURNED'
+    ORDER BY GM.gauge_id`, [tenantId, Number(calibrationReturnId)]);
   return { ...headers[0], items };
 }
 
@@ -283,6 +420,7 @@ export async function listGauges(filters = {}) {
     GM.manufacturer_serial_number AS manufacturerSerialNumber,GM.measurement_range AS measurementRange,
     GM.calibration_due_date AS calibrationDueDate,GM.current_location AS currentLocation,
     GM.assigned_to AS assignedTo,GM.calibration_agency AS calibrationAgency,GM.operational_status AS operationalStatus,
+    ${effectiveOperationalStatusSql()} AS effectiveOperationalStatus,
     GM.storage_location_id AS storageLocationId,
     COALESCE(CONCAT(L.warehouse_code,' / ',L.bin_location),'') AS storageLocation,
     COALESCE(GM.updated_at,GM.created_at) AS lastUpdated,
@@ -311,6 +449,7 @@ export async function getGaugeById(gaugeMasterId, tenantId, connection = db, loc
     GM.calibration_frequency_months AS calibrationFrequencyMonths,GM.last_calibration_date AS lastCalibrationDate,
     GM.calibration_due_date AS calibrationDueDate,GM.calibration_agency AS calibrationAgency,
     GM.current_location AS currentLocation,GM.assigned_to AS assignedTo,GM.operational_status AS operationalStatus,
+    ${effectiveOperationalStatusSql()} AS effectiveOperationalStatus,
     GM.active_flag AS activeFlag,GM.remarks,G.grn_number AS grnNumber,G.grn_date AS grnDate,
     GI.warehouse_code AS receiptWarehouseCode,GI.bin_location AS receiptBinLocation,
     DATEDIFF(GM.calibration_due_date,CURDATE()) AS daysLeft,${gaugeConditionSql()} AS calibrationCondition,
@@ -332,7 +471,7 @@ export async function getGaugeById(gaugeMasterId, tenantId, connection = db, loc
     certificate_file_size_bytes AS certificateFileSizeBytes,
     CASE WHEN certificate_file_path IS NULL THEN NULL ELSE CONCAT('/uploads/',REPLACE(certificate_file_path,'\\\\','/')) END AS certificateFileUrl,remarks,
     created_by AS createdBy,created_at AS createdAt
-    FROM gauge_history WHERE gauge_master_id=? AND tenant_id=?
+    FROM gauge_history WHERE gauge_master_id=? AND tenant_id=? AND event_type <> 'UPDATED'
     ORDER BY event_date DESC,gauge_history_id DESC`, [Number(gaugeMasterId), tenantId]);
   return { ...gauge, history };
 }

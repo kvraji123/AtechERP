@@ -6,6 +6,7 @@ export type PurchaseOrderLine = {
   itemCode: string;
   itemName: string;
   specification: string;
+  otherSpecification?: string;
   quantity: number;
   uom: string;
   rate: number;
@@ -26,9 +27,11 @@ export type PurchaseOrderFormState = {
   transportMode: string;
   billingAddress: string;
   deliveryAddress: string;
-  packingCharges?: number;
-  freightCharges?: number;
-  otherCharges?: number;
+  // Keep optional charge inputs as text while the user is typing, so decimals and
+  // deleting a zero do not get immediately converted back to 0.
+  packingCharges?: number | string;
+  freightCharges?: number | string;
+  otherCharges?: number | string;
   remarks: string;
   specialInstructions: string;
 };

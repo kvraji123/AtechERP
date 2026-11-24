@@ -10,10 +10,12 @@ import {
   Boxes,
   Factory,
   LayoutDashboard,
+  MapPin,
   Menu,
   Package,
   PackagePlus,
   PackageOpen,
+  PackageCheck,
   Ruler,
   Search,
   Send,
@@ -21,11 +23,14 @@ import {
   ShieldAlert,
   ShoppingCart,
   Users,
+  Warehouse,
   Gauge,
+  Wrench,
+  LogOut,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 
-import logo from "../assets/atech-logo.jpeg";
+import CompanyMark from "../components/CompanyMark";
 import { useAuth } from "../context/AuthContext";
 
 type TopbarProps = {
@@ -33,32 +38,56 @@ type TopbarProps = {
 };
 
 export default function Topbar({ onMenuClick }: TopbarProps) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
+  const grnMenuRef = useRef<HTMLDivElement>(null);
   const inventoryMenuRef = useRef<HTMLDivElement>(null);
+  const toolingMenuRef = useRef<HTMLDivElement>(null);
   const mastersMenuRef = useRef<HTMLDivElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const [grnOpen, setGrnOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [toolingOpen, setToolingOpen] = useState(false);
   const [mastersOpen, setMastersOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const marketingActive = location.pathname.startsWith("/marketing");
   const mastersActive = location.pathname.startsWith("/masters");
   const reportsActive = location.pathname.startsWith("/reports");
   const purchaseActive = location.pathname.startsWith("/purchase");
+  const grnActive = location.pathname.startsWith("/gate-entry")
+    || location.pathname.startsWith("/grn-inward")
+    || location.pathname.startsWith("/material-outward")
+    || location.pathname.startsWith("/gate-exit");
   const inventoryActive = location.pathname.startsWith("/inventory");
+  const toolingActive = location.pathname.startsWith("/tooling");
+  const operationsActive = location.pathname.startsWith("/operations");
 
   useEffect(() => {
+    setGrnOpen(false);
     setInventoryOpen(false);
+    setToolingOpen(false);
     setMastersOpen(false);
+    setProfileOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node;
+      if (grnMenuRef.current && !grnMenuRef.current.contains(target)) {
+        setGrnOpen(false);
+      }
       if (inventoryMenuRef.current && !inventoryMenuRef.current.contains(target)) {
         setInventoryOpen(false);
       }
+      if (toolingMenuRef.current && !toolingMenuRef.current.contains(target)) {
+        setToolingOpen(false);
+      }
       if (mastersMenuRef.current && !mastersMenuRef.current.contains(target)) {
         setMastersOpen(false);
+      }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(target)) {
+        setProfileOpen(false);
       }
     };
 
@@ -66,10 +95,14 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     return () => document.removeEventListener("mousedown", closeOnOutsideClick);
   }, []);
 
+  if (!user) return null;
+
+  const avatarInitial = user.empName.trim().charAt(0).toUpperCase() || "U";
+
   return (
     <header className="app-topbar">
       <div className="topbar-brand">
-        <img src={logo} alt="A Tech Automation" />
+        <CompanyMark className="topbar-company-mark" />
       </div>
 
       <button
@@ -108,6 +141,46 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
           <span>Purchase</span>
         </NavLink>
 
+        <div className="topbar-menu-group" ref={grnMenuRef}>
+          <button
+            type="button"
+            className={`topbar-nav-link topbar-menu-trigger ${grnActive ? "active" : ""}`}
+            aria-expanded={grnOpen}
+            aria-haspopup="menu"
+            onClick={() => {
+              setGrnOpen((current) => !current);
+              setInventoryOpen(false);
+              setToolingOpen(false);
+              setMastersOpen(false);
+            }}
+          >
+            <Warehouse size={18} />
+            <span>GRN</span>
+            <ChevronDown size={16} className={grnOpen ? "expanded" : ""} />
+          </button>
+
+          {grnOpen && (
+            <div className="topbar-dropdown topbar-grn-dropdown" role="menu">
+              <NavLink to="/gate-entry" role="menuitem">
+                <Warehouse size={17} />
+                <span>Gate Entry</span>
+              </NavLink>
+              <NavLink to="/grn-inward" role="menuitem">
+                <PackageCheck size={17} />
+                <span>GRN Inward</span>
+              </NavLink>
+              <NavLink to="/material-outward" role="menuitem">
+                <Send size={17} />
+                <span>GRN Outward</span>
+              </NavLink>
+              <NavLink to="/gate-exit" role="menuitem">
+                <LogOut size={17} />
+                <span>Gate Exit</span>
+              </NavLink>
+            </div>
+          )}
+        </div>
+
         <div className="topbar-menu-group" ref={inventoryMenuRef}>
           <button
             type="button"
@@ -118,6 +191,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
             aria-haspopup="menu"
             onClick={() => {
               setInventoryOpen((current) => !current);
+              setToolingOpen(false);
               setMastersOpen(false);
             }}
           >
@@ -152,10 +226,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
                 <PackageOpen size={17} />
                 <span>Customer Material</span>
               </NavLink>
-              <NavLink to="/inventory/return-to-customer" role="menuitem">
-                <Send size={17} />
-                <span>Return to Customer</span>
-              </NavLink>
               <NavLink to="/inventory/transactions" role="menuitem">
                 <ClipboardList size={17} />
                 <span>Stock Transactions</span>
@@ -168,6 +238,42 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
           )}
         </div>
 
+        <div className="topbar-menu-group" ref={toolingMenuRef}>
+          <button
+            type="button"
+            className={`topbar-nav-link topbar-menu-trigger ${toolingActive ? "active" : ""}`}
+            aria-expanded={toolingOpen}
+            aria-haspopup="menu"
+            onClick={() => {
+              setToolingOpen((current) => !current);
+              setGrnOpen(false);
+              setInventoryOpen(false);
+              setMastersOpen(false);
+            }}
+          >
+            <Wrench size={18} />
+            <span>Tooling</span>
+            <ChevronDown size={16} className={toolingOpen ? "expanded" : ""} />
+          </button>
+
+          {toolingOpen && (
+            <div className="topbar-dropdown" role="menu">
+              <NavLink to="/tooling" end role="menuitem">
+                <Wrench size={17} />
+                <span>Tool Lifecycle</span>
+              </NavLink>
+            </div>
+          )}
+        </div>
+
+        <NavLink
+          to="/operations/work-order-inspection"
+          className={`topbar-nav-link ${operationsActive ? "active" : ""}`}
+        >
+          <Factory size={18} />
+          <span>Operations</span>
+        </NavLink>
+
         <div className="topbar-menu-group" ref={mastersMenuRef}>
           <button
             type="button"
@@ -179,6 +285,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
             onClick={() => {
               setMastersOpen((current) => !current);
               setInventoryOpen(false);
+              setToolingOpen(false);
             }}
           >
             <Database size={18} />
@@ -190,7 +297,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
           </button>
 
           {mastersOpen && (
-            <div className="topbar-dropdown" role="menu">
+            <div className="topbar-dropdown topbar-masters-dropdown" role="menu">
               <NavLink to="/masters/customers" role="menuitem">
                 <Users size={17} />
                 <span>Customer Master</span>
@@ -206,6 +313,14 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
               <NavLink to="/masters/items" role="menuitem">
                 <PackagePlus size={17} />
                 <span>Item Master</span>
+              </NavLink>
+              <NavLink to="/masters/tools" role="menuitem">
+                <Wrench size={17} />
+                <span>Tool Master</span>
+              </NavLink>
+              <NavLink to="/masters/locations" role="menuitem">
+                <MapPin size={17} />
+                <span>Location Master</span>
               </NavLink>
               <NavLink to="/masters/machines" role="menuitem">
                 <Cog size={17} />
@@ -253,18 +368,71 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       </div>
 
       <div className="topbar-actions">
-        <button
-          type="button"
-          className="topbar-profile"
-          aria-label={`Signed in as ${user.empName}`}
-        >
-          <div className="topbar-avatar">{user.empName[0]}</div>
-          <div className="topbar-profile-text">
-            <strong>{user.empName}</strong>
-            <span>{user.roleName}</span>
-          </div>
-          <ChevronDown size={17} />
-        </button>
+        <div className="topbar-profile-menu" ref={profileMenuRef}>
+          <button
+            type="button"
+            className="topbar-profile"
+            aria-label={`Open account menu for ${user.empName}`}
+            aria-expanded={profileOpen}
+            aria-haspopup="menu"
+            onClick={() => {
+              setProfileOpen((current) => !current);
+              setGrnOpen(false);
+              setInventoryOpen(false);
+              setToolingOpen(false);
+              setMastersOpen(false);
+            }}
+          >
+            <div className="topbar-avatar">{avatarInitial}</div>
+            <div className="topbar-profile-text">
+              <strong>{user.empName}</strong>
+              <span>{user.roleName}</span>
+            </div>
+            <ChevronDown
+              size={18}
+              strokeWidth={2.75}
+              className={`topbar-profile-chevron ${profileOpen ? "expanded" : ""}`}
+            />
+          </button>
+
+          {profileOpen && (
+            <div className="topbar-account-dropdown" role="menu">
+              <div className="topbar-account-summary">
+                <div className="topbar-avatar">{avatarInitial}</div>
+                <div>
+                  <strong>{user.empName}</strong>
+                  <span>{user.roleName}</span>
+                </div>
+              </div>
+
+              {String(user.roleName).trim().toUpperCase() === "ADMINISTRATOR" && (
+                <NavLink
+                  to="/admin/users"
+                  className="topbar-account-menu-item"
+                  role="menuitem"
+                  onClick={() => setProfileOpen(false)}
+                >
+                  <Users size={17} />
+                  <span>User accounts</span>
+                </NavLink>
+              )}
+
+              <div className="topbar-account-divider" />
+              <button
+                type="button"
+                className="topbar-account-menu-item logout"
+                role="menuitem"
+                onClick={() => {
+                  setProfileOpen(false);
+                  void logout();
+                }}
+              >
+                <LogOut size={17} />
+                <span>Logout</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

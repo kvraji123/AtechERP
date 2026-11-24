@@ -22,7 +22,7 @@ export async function eligibleItems(tenantId) {
 }
 
 export async function getSupplier(connection, supplierId) {
-  const [rows] = await connection.execute(`SELECT supplier_id AS supplierId, supplier_code AS supplierCode, supplier_name AS supplierName, COALESCE(NULLIF(delivery_address,''),billing_address) AS billingAddress, delivery_address AS deliveryAddress, gst_number AS gstNumber, email_address AS emailAddress, currency_code AS currencyCode, allowed_transport_modes AS allowedTransportModes, transport_mode AS transportMode FROM supplier_master WHERE supplier_id=? AND active_flag='Y'`, [Number(supplierId)]);
+  const [rows] = await connection.execute(`SELECT supplier_id AS supplierId, supplier_code AS supplierCode, supplier_name AS supplierName, COALESCE(NULLIF(delivery_address,''),billing_address) AS billingAddress, delivery_address AS deliveryAddress, gst_number AS gstNumber, email_address AS emailAddress, currency_code AS currencyCode, allowed_transport_modes AS allowedTransportModes, transport_mode AS transportMode FROM supplier_master WHERE supplier_id=? AND active_flag='Y' AND COALESCE(save_status,'SUBMITTED')='SUBMITTED'`, [Number(supplierId)]);
   return rows[0] || null;
 }
 

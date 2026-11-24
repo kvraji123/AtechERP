@@ -4,7 +4,7 @@ const itemSelect = `
   SELECT I.item_id AS itemId, I.item_code AS itemCode,
     G.group_name AS itemGroupName, T.type_name AS itemTypeName,
     I.item_description AS itemDescription, I.item_specification AS itemSpecification,
-    U.uom_code AS uomCode, I.hsn_code AS hsnCode,
+    U.uom_code AS uomCode, I.hsn_code AS hsnCode, I.tax_percent AS taxPercent,
     COALESCE(I.purchase_rate, 0) AS purchaseRate
   FROM item_master I
   JOIN item_group_master G ON G.item_group_id = I.item_group_id
@@ -29,6 +29,14 @@ export async function insertRequest(connection, values) {
   return result.insertId;
 }
 
+export async function getActiveDepartmentByName(connection, departmentName) {
+  const [rows] = await connection.execute(`SELECT department_code AS departmentCode,
+    department_name AS departmentName FROM department_master
+    WHERE active_flag='Y' AND UPPER(department_name)=UPPER(?) LIMIT 1`,
+  [String(departmentName || "").trim()]);
+  return rows[0] || null;
+}
+
 export async function insertItem(connection, values) {
   const [result] = await connection.execute(`
     INSERT INTO purchase_request_items
@@ -50,7 +58,7 @@ export async function insertHeaderHistory(connection, values) {
   `, values);
 }
 
-export async function listRequests({ tenantId, search = "", status = "", plant = "", department = "", priority = "", rfqEligible = false, clarificationOnly = false, limit = 20, offset = 0 }) {
+export async function listRequests({ tenantId, search = "", status = "", plant = "", department = "", priority = "", rfqEligible = false, pendingApproval = false, clarificationOnly = false, limit = 20, offset = 0 }) {
   const rfqEligibleClause = rfqEligible ? `
       AND PR.requisition_type='NEW_ITEM'
       AND PR.pr_status IN ('APPROVED','PARTIALLY_APPROVED')
@@ -63,6 +71,7 @@ export async function listRequests({ tenantId, search = "", status = "", plant =
   const clarificationClause = clarificationOnly
     ? " AND EXISTS (SELECT 1 FROM purchase_request_items CLARIFICATION_ITEM WHERE CLARIFICATION_ITEM.purchase_request_id=PR.purchase_request_id AND CLARIFICATION_ITEM.tenant_id=PR.tenant_id AND CLARIFICATION_ITEM.approval_status='CLARIFICATION')"
     : "";
+  const pendingApprovalClause = pendingApproval ? " AND PR.pr_status IN ('SUBMITTED', 'PENDING_APPROVAL')" : "";
   const params = [tenantId, search, search, search, status, status, plant, plant, department, department, priority, priority];
   const [rows] = await db.execute(`
     SELECT PR.purchase_request_id AS id, PR.pr_number AS prNumber,
@@ -147,7 +156,7 @@ export async function listRequests({ tenantId, search = "", status = "", plant =
       AND (? = '' OR PR.pr_status = ?)
       AND (? = '' OR PR.plant_code = ?)
       AND (? = '' OR PR.floor_department = ?)
-      AND (? = '' OR PR.priority = ?)${rfqEligibleClause}${clarificationClause}
+      AND (? = '' OR PR.priority = ?)${rfqEligibleClause}${pendingApprovalClause}${clarificationClause}
     GROUP BY PR.purchase_request_id
     ORDER BY COALESCE(PR.updated_on, PR.submitted_on, PR.created_on) DESC, PR.purchase_request_id DESC
     LIMIT ${Number(limit)} OFFSET ${Number(offset)}
@@ -164,7 +173,7 @@ export async function listRequests({ tenantId, search = "", status = "", plant =
       AND (? = '' OR PR.pr_status = ?)
       AND (? = '' OR PR.plant_code = ?)
       AND (? = '' OR PR.floor_department = ?)
-      AND (? = '' OR PR.priority = ?)${rfqEligibleClause}${clarificationClause}
+      AND (? = '' OR PR.priority = ?)${rfqEligibleClause}${pendingApprovalClause}${clarificationClause}
   `, [tenantId, search, search, search, search, search, status, status, plant, plant, department, department, priority, priority]);
   return { rows, total: Number(countRows[0]?.total || 0) };
 }
@@ -177,6 +186,7 @@ export async function summary(tenantId) {
       COALESCE(SUM(effectiveStatus='RETURNED'), 0) AS clarification,
       COALESCE(SUM(effectiveStatus='REJECTED'), 0) AS rejected,
       COALESCE(SUM(effectiveStatus='APPROVED'), 0) AS approved,
+      COALESCE(SUM(effectiveStatus IN ('SUBMITTED','PENDING_APPROVAL')), 0) AS pendingApproval,
       COALESCE(SUM(effectiveStatus NOT IN ('APPROVED','PARTIALLY_APPROVED','RETURNED','REJECTED','CANCELLED')), 0) AS pending,
       COALESCE(SUM(
         requisitionType='NEW_ITEM'
@@ -243,6 +253,6 @@ export async function updateDraft(connection, id, tenantId, values) {
     UPDATE purchase_requests SET plant_code=?, plant_id=?, floor_department=?, department_id=?,
       request_date=?, required_date=?, requisition_type=?, priority=?, preferred_supplier_id=?,
       quote_reference=?, remarks=?, updated_by=?
-      WHERE purchase_request_id=? AND tenant_id=? AND pr_status IN ('DRAFT','RETURNED','PARTIALLY_APPROVED','APPROVED')
+      WHERE purchase_request_id=? AND tenant_id=? AND pr_status IN ('DRAFT','SUBMITTED','PENDING_APPROVAL','RETURNED','PARTIALLY_APPROVED','APPROVED')
   `, [...values, Number(id), tenantId]);
 }

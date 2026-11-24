@@ -121,3 +121,21 @@ export const uploadGaugeCertificate = multer({
     fileSize: Math.min(env.maxUploadMb, 10) * 1024 * 1024,
   },
 }).single("certificate");
+
+// Calibration Return GRNs may receive multiple Gauge IDs in one transaction.
+// Each PDF uses a field name of `certificate_<gaugeMasterId>` so the controller
+// can attach it to the correct returned Gauge ID.
+export const uploadGaugeReturnCertificates = multer({
+  storage: gaugeCertificateStorage,
+  fileFilter(_req, file, callback) {
+    const extension = path.extname(file.originalname).toLowerCase();
+    if (extension !== ".pdf" || (file.mimetype && file.mimetype !== "application/pdf")) {
+      return callback(new AppError("Only PDF calibration certificates can be uploaded.", 400));
+    }
+    callback(null, true);
+  },
+  limits: {
+    fileSize: Math.min(env.maxUploadMb, 10) * 1024 * 1024,
+    files: 50,
+  },
+}).any();

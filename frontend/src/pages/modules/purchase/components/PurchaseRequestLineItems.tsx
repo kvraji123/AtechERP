@@ -14,13 +14,14 @@ export type PurchaseItemOption = {
   uom: string;
   hsn: string;
   tax: string;
-  purchaseRate?: number | null;
+  supplierPurchaseRate?: number | null;
 };
 
 type PurchaseRequestLineItemsProps = {
   lines: PurchaseRequestLine[];
   onChange: (lines: PurchaseRequestLine[]) => void;
   itemOptions?: PurchaseItemOption[];
+  hasPreferredSupplier?: boolean;
 };
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
@@ -140,7 +141,7 @@ function ItemSearchPicker({ line, options, disabled = false, onSelect }: ItemSea
   );
 }
 
-export default function PurchaseRequestLineItems({ lines, onChange, itemOptions }: PurchaseRequestLineItemsProps) {
+export default function PurchaseRequestLineItems({ lines, onChange, itemOptions, hasPreferredSupplier = false }: PurchaseRequestLineItemsProps) {
   const options: PurchaseItemOption[] = itemOptions || [];
 
   const updateLine = (id: number, patch: Partial<PurchaseRequestLine>) => {
@@ -159,7 +160,7 @@ export default function PurchaseRequestLineItems({ lines, onChange, itemOptions 
       uom: item.uom,
       hsnCode: item.hsn,
       taxPercent: item.tax,
-      ratePerQty: item.purchaseRate == null ? "" : String(item.purchaseRate),
+      ratePerQty: item.supplierPurchaseRate == null ? "" : String(item.supplierPurchaseRate),
     } : { itemId: undefined, itemCode: "", itemType: "", itemGroup: "", itemDescription: "", specification: "", hsnCode: "", taxPercent: "", ratePerQty: "" });
   };
 
@@ -218,7 +219,7 @@ export default function PurchaseRequestLineItems({ lines, onChange, itemOptions 
                 <td><textarea value={line.specification} placeholder="Auto-filled from Item Master" disabled /></td>
                 <td><input type="number" min="1" step="1" inputMode="numeric" value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: event.target.value })} required disabled={line.editable === false} /></td>
                 <td><input value={line.uom} onChange={(event) => updateLine(line.id, { uom: event.target.value })} required disabled={line.editable === false} /></td>
-                <td><input className="purchase-auto-rate" type="number" min="0" step="0.01" value={line.ratePerQty} placeholder="Auto-filled from Item Master" readOnly /></td>
+                <td><input className="purchase-auto-rate" type="number" min="0" step="0.01" value={line.ratePerQty} placeholder={hasPreferredSupplier ? "No rate configured" : "Select preferred supplier"} readOnly /></td>
                 <td><input value={line.taxPercent} onChange={(event) => updateLine(line.id, { taxPercent: event.target.value })} placeholder="Auto" disabled={line.editable === false} /><small>{line.taxPercent ? `${line.taxPercent}%` : "From Item Master"}</small></td>
                 <td><input value={line.hsnCode} onChange={(event) => updateLine(line.id, { hsnCode: event.target.value })} placeholder="Auto" disabled={line.editable === false} /></td>
                 <td><strong className="purchase-line-total">{money.format(lineTotal(line))}</strong></td>

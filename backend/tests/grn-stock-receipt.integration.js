@@ -14,18 +14,48 @@ try {
   assert.equal(openPurchase.purchaseOrderId, null);
   assert.equal(openPurchase.items[0].itemId, 1);
   assert.throws(() => validateGrnStockPosting({}), /stock posting date/i);
-  assert.throws(() => validateGrnStockPosting({ stockPostingDate: "2026-09-11", receivedBy: "Stores", items: [{ grnItemId: 1, warehouseCode: "Main Stores" }] }), /bin location/i);
-  const posting = validateGrnStockPosting({ stockPostingDate: "2026-09-11", receivedBy: "Stores", items: [{ grnItemId: 1, warehouseCode: "Main Stores", binLocation: "TEST-BIN", batchSerialNumber: "TEST-BATCH" }] });
+  assert.throws(
+    () => validateGrnStockPosting({
+      stockPostingDate: "2026-09-11",
+      receivedBy: "Stores",
+      items: [{ grnItemId: 1, warehouseCode: "Main Stores", binLocation: "TEST-BIN" }],
+    }),
+    /sub-inventory/i,
+  );
+  assert.throws(
+    () => validateGrnStockPosting({
+      stockPostingDate: "2026-09-11",
+      receivedBy: "Stores",
+      items: [{ grnItemId: 1, warehouseCode: "Main Stores", subinventoryCode: "RM" }],
+    }),
+    /bin location/i,
+  );
+  const posting = validateGrnStockPosting({
+    stockPostingDate: "2026-09-11",
+    receivedBy: "Stores",
+    items: [{
+      grnItemId: 1,
+      warehouseCode: "Main Stores",
+      subinventoryCode: "RM",
+      binLocation: "TEST-BIN",
+      batchSerialNumber: "TEST-BATCH",
+    }],
+  });
   assert.equal(posting.items[0].warehouseCode, "Main Stores");
+  assert.equal(posting.items[0].subinventoryCode, "RM");
 
   connection = await db.getConnection();
   await connection.beginTransaction();
   const [items] = await connection.execute("SELECT item_id FROM item_master WHERE active_flag='Y' LIMIT 1");
   assert.ok(items[0], "An active item is needed to verify stock receipt balances.");
-  const values = ["DEFAULT", null, "GRN-STOCK-TEST", items[0].item_id, "Test Warehouse", "TEST-BIN", "TEST-BATCH", 3, "GRN_STOCK_TEST", "GRN_STOCK_TEST"];
+  const values = [
+    "DEFAULT", null, "GRN-STOCK-TEST", items[0].item_id,
+    "Test Warehouse", "RM", "TEST-BIN", "AVAILABLE", "TEST-BATCH", "",
+    3, "GRN_STOCK_TEST", "GRN_STOCK_TEST",
+  ];
   let balance = await repository.upsertInventoryBalance(connection, values);
   assert.equal(balance.quantityOnHand, 3);
-  values[7] = 2;
+  values[10] = 2;
   balance = await repository.upsertInventoryBalance(connection, values);
   assert.equal(balance.quantityOnHand, 5);
   console.log("GRN stock receipt validation and inventory balance integration test passed.");

@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS marketing_quotation_items (
   part_price_fob_foreign DECIMAL(18,4) NOT NULL,
   total_development_cost_inr DECIMAL(18,4) NOT NULL,
   total_development_cost_foreign DECIMAL(18,4) NOT NULL,
+  sample_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
   created_by VARCHAR(50) NOT NULL,
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -169,7 +170,9 @@ VALUES
  ('MOQ', 'Supply quantity is subject to the MOQ stated against each item.', 'Y', 30),
  ('CURRENCY', 'Prices are based on the quotation currency and exchange rate used in the completed Workout.', 'Y', 40),
  ('PRICE_VALIDITY', 'This quotation is valid for 30 days from the quotation date.', 'Y', 50),
- ('DEVELOPMENT', 'Development time and pilot batch delivery are as stated in the completed Workout.', 'Y', 60)
+ ('DEVELOPMENT', 'Development time and pilot batch delivery are as stated in the completed Workout.', 'Y', 60),
+ ('RAW_MATERIAL_WEIGHT_VARIATION', 'Any change in raw material weight during production may lead to a price revision.', 'Y', 70),
+ ('CURRENCY_RAW_MATERIAL_REVISION', 'Currency value changes and raw material price changes may lead to a price revision once every three months.', 'Y', 80)
 ON DUPLICATE KEY UPDATE note_text=VALUES(note_text), sort_order=VALUES(sort_order), active_flag='Y';
 
 INSERT INTO app_document_sequences (sequence_key, financial_year, prefix, current_number, number_padding)

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Building2,
   ExternalLink,
+  Pencil,
   Plus,
   Save,
   Send,
@@ -20,6 +21,7 @@ import {
 import {
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import { supplierApi } from "../../api/supplier.api";
 import { attachmentApi, type StoredAttachment } from "../../api/attachment.api";
@@ -31,6 +33,7 @@ import {
 } from "../../api/location.api";
 import Alert from "../../components/Alert";
 import { useAppFeedback } from "../../components/AppFeedback";
+import { useAuth } from "../../context/AuthContext";
 import TransportModeMultiSelect from "../../components/TransportModeMultiSelect";
 import "./CustomerFormPage.css";
 type SupplierAttachmentType =
@@ -51,6 +54,7 @@ type SupplierAttachment = {
 
 type SupplierFormData = {
   supplierType: string;
+  supplierCategory: string;
   supplierCode: string;
   supplierName: string;
 
@@ -113,8 +117,14 @@ function storedAttachments(attachments: StoredAttachment[]): SupplierAttachment[
     : [createAttachment()];
 }
 
+const usesIndianPostalCode = (country: string) => {
+  const normalizedCountry = country.trim().toUpperCase();
+  return !normalizedCountry || normalizedCountry === "INDIA" || normalizedCountry === "IN";
+};
+
 const initialForm: SupplierFormData = {
   supplierType: "",
+  supplierCategory: "",
   supplierCode: "Auto Generated",
   supplierName: "",
 
@@ -162,11 +172,18 @@ export default function SupplierFormPage() {
     "DELIVERY_TERM", "PAYMENT_TERM", "TRANSPORT_MODE",
   ]);
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { confirmDelete } = useAppFeedback();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const supplierId = Number(id || 0);
 
   const isEditMode = supplierId > 0;
+  const isReadOnly = isEditMode && searchParams.get("mode") === "view";
+  const isAdministrator = String(user?.roleName || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_") === "ADMINISTRATOR";
 
   const [form, setForm] =
     useState<SupplierFormData>(initialForm);
@@ -183,8 +200,10 @@ export default function SupplierFormPage() {
   const [cityLookupError, setCityLookupError] = useState("");
   const [citySelected, setCitySelected] = useState(false);
   const [activeCityIndex, setActiveCityIndex] = useState(-1);
+  const indianSupplier = usesIndianPostalCode(form.country);
+  const postalCodeLabel = indianSupplier ? "Pin Code" : "Postal / ZIP Code";
 
-  const unsaved = useUnsavedChanges(form);
+  const unsaved = useUnsavedChanges(form, undefined, !isReadOnly);
 
   useEffect(() => {
     if (!supplierId) {
@@ -204,6 +223,7 @@ export default function SupplierFormPage() {
 
         setForm({
           supplierType: String(data.supplier_type ?? data.supplierType ?? "").toUpperCase(),
+          supplierCategory: String(data.supplier_category ?? data.supplierCategory ?? "").toUpperCase(),
           supplierCode: data.supplier_code ?? data.supplierCode ?? "",
           supplierName: data.supplier_name ?? data.supplierName ?? "",
           address: data.address ?? data.delivery_address ?? data.billing_address ?? "",
@@ -438,13 +458,11 @@ export default function SupplierFormPage() {
   const validate = (
     action: "DRAFT" | "SUBMIT"
   ) => {
+    if (action === "DRAFT") return true;
+
     if (!form.supplierName.trim()) {
       setError("Supplier name is required.");
       return false;
-    }
-
-    if (action === "DRAFT") {
-      return true;
     }
 
     if (!form.supplierType) {
@@ -452,9 +470,19 @@ export default function SupplierFormPage() {
       return false;
     }
 
+    if (!form.supplierCategory) {
+      setError("Supplier Category / Process is required.");
+      return false;
+    }
+
+    if (form.transportModes.length === 0) {
+      setError("Select at least one transport mode.");
+      return false;
+    }
+
     const requiredFields: Array<[string, string]> = [
       [form.address, "Address"],
-      [form.pinCode, "Pin code"],
+      [form.pinCode, postalCodeLabel],
       [form.city, "City"],
       [form.state, "State"],
       [form.country, "Country"],
@@ -472,11 +500,13 @@ export default function SupplierFormPage() {
     }
 
 
-    if (
-      form.pinCode &&
-      !/^\d{6}$/.test(form.pinCode)
-    ) {
+    if (indianSupplier && form.pinCode && !/^\d{6}$/.test(form.pinCode)) {
       setError("Enter a valid 6 digit pin code.");
+      return false;
+    }
+
+    if (!indianSupplier && form.pinCode && !/^[A-Za-z0-9]{3,10}$/.test(form.pinCode)) {
+      setError("Enter a valid Postal / ZIP code using 3 to 10 letters or numbers.");
       return false;
     }
 
@@ -496,6 +526,12 @@ export default function SupplierFormPage() {
   const saveSupplier = async (
     action: "DRAFT" | "SUBMIT"
   ) => {
+    if (isReadOnly) return;
+    if (action === "SUBMIT" && !isAdministrator) {
+      setMessage("");
+      setError("Only administrators can submit Supplier Masters. You can save this record as a draft.");
+      return;
+    }
     if (!validate(action)) {
       return;
     }
@@ -506,7 +542,9 @@ export default function SupplierFormPage() {
       setMessage("");
 
       const payload = {
+        action,
         supplierType: form.supplierType,
+        supplierCategory: form.supplierCategory,
         supplierCode: isEditMode ? form.supplierCode : null,
         supplierName: form.supplierName.trim(),
         address: form.address.trim() || null,
@@ -549,7 +587,7 @@ export default function SupplierFormPage() {
 
       if (!savedId) throw new Error("Supplier was saved but its identifier was not returned.");
 
-      if (savedId && (isEditMode || form.supplierStatus === "INACTIVE")) {
+      if (action === "SUBMIT" && savedId && (isEditMode || form.supplierStatus === "INACTIVE")) {
         await supplierApi.changeStatus(
           savedId,
           form.supplierStatus as "ACTIVE" | "INACTIVE"
@@ -573,15 +611,19 @@ export default function SupplierFormPage() {
         return null;
       }));
       const nextAttachments = storedAttachments(savedAttachments.filter((attachment): attachment is StoredAttachment => Boolean(attachment)));
-      const nextForm = { ...form, attachments: nextAttachments };
       setForm((current) => ({ ...current, attachments: nextAttachments }));
 
-      unsaved.markSavedValue(nextForm); setMessage(response?.message ?? "Supplier saved successfully.");
+      unsaved.markSaved();
+      setMessage(response?.message ?? "Supplier saved successfully.");
 
       if (action === "SUBMIT") {
         window.setTimeout(() => {
           navigate("/masters/suppliers");
         }, 700);
+      } else if (!isEditMode) {
+        // Keep subsequent draft saves on this persisted record. Remaining on
+        // /new would issue another POST and create a duplicate supplier.
+        navigate(`/masters/suppliers/${savedId}`, { replace: true });
       }
     } catch (saveError) {
       setError(apiMessage(saveError));
@@ -594,6 +636,12 @@ export default function SupplierFormPage() {
     event: FormEvent<HTMLFormElement>
   ) => {
     event.preventDefault();
+    if (isReadOnly) return;
+    if (!isAdministrator) {
+      setMessage("");
+      setError("Only administrators can submit Supplier Masters. You can save this record as a draft.");
+      return;
+    }
     void saveSupplier("SUBMIT");
   };
 
@@ -603,7 +651,9 @@ export default function SupplierFormPage() {
         <div className="master-form-title-group">
           <Building2 size={22} />
           <h1>
-            {isEditMode
+            {isReadOnly
+              ? "View Supplier"
+              : isEditMode
               ? "Edit Supplier"
               : "Create Supplier"}
           </h1>
@@ -618,10 +668,17 @@ export default function SupplierFormPage() {
             }
           >
             <ArrowLeft size={15} />
-            Cancel
+            {isReadOnly ? "Back" : "Cancel"}
           </button>
 
-          <button
+          {isReadOnly ? <button
+            type="button"
+            className="primary-action-button"
+            onClick={() => navigate(`/masters/suppliers/${supplierId}?mode=edit`)}
+          >
+            <Pencil size={17} />
+            Edit Supplier
+          </button> : <><button
             type="button"
             className="secondary-action-button draft"
             disabled={saving !== null}
@@ -640,16 +697,20 @@ export default function SupplierFormPage() {
             type="submit"
             form="customer-master-form"
             className="primary-action-button"
-            disabled={saving !== null}
+            disabled={saving !== null || !isAdministrator}
+            title={isAdministrator ? undefined : "Only administrators can submit Supplier Masters"}
           >
             <Send size={17} />
 
             {saving === "SUBMIT"
               ? "Saving..."
+              : !isAdministrator
+                ? "Submit (Admin only)"
               : isEditMode
                 ? "Update"
                 : "Submit"}
           </button>
+          </>}
         </div>
       </section>
 
@@ -667,6 +728,7 @@ export default function SupplierFormPage() {
         className="master-entry-form"
         onSubmit={handleSubmit}
       >
+        <fieldset className="master-read-only-fields" disabled={isReadOnly}>
         <section className="master-form-section">
           <div className="master-section-header">
             <div>
@@ -682,7 +744,12 @@ export default function SupplierFormPage() {
               <span>Supplier Type<b>*</b>
               </span>
 
-              <select name="supplierType" value={form.supplierType} onChange={handleChange}><option value="">Select supplier type</option><option value="MANUFACTURER">Manufacturer</option><option value="DEALER">Dealer</option></select>
+              <select name="supplierType" value={form.supplierType} onChange={handleChange}><option value="">Select supplier type</option><option value="MANUFACTURER">Manufacturer</option><option value="TRADER">Trader</option><option value="SERVICE_PROVIDER">Service provider</option></select>
+            </label>
+
+            <label className="master-field">
+              <span>Supplier Category / Process<b>*</b></span>
+              <select name="supplierCategory" value={form.supplierCategory} onChange={handleChange}><option value="">Select supplier category / process</option><option value="CALIBRATION">Calibration</option><option value="TOOLING">Tooling</option><option value="RAW_MATERIAL">Raw Material</option><option value="CHILD_PARTS">Child Parts</option><option value="PACKING_MATERIAL">Packing Material</option><option value="POWDER_COATING">Powder Coating</option></select>
             </label>
 
             <label className="master-field">
@@ -797,19 +864,27 @@ export default function SupplierFormPage() {
               </select>
             </label>
             <label className="master-field">
-              <span>Transport Modes</span>
-              <TransportModeMultiSelect options={referenceData.options("TRANSPORT_MODE")} value={form.transportModes} onChange={(transportModes) => setForm((current) => ({ ...current, transportModes }))} />
+              <span>Transport Modes <b>*</b></span>
+              <TransportModeMultiSelect
+                options={referenceData.options("TRANSPORT_MODE")}
+                value={form.transportModes}
+                onChange={(transportModes) => {
+                  setForm((current) => ({ ...current, transportModes }));
+                  setError("");
+                  setMessage("");
+                }}
+              />
             </label>
 
             <label className="master-field">
-              <span>Pin Code <b>*</b></span>
+              <span>{postalCodeLabel} <b>*</b></span>
 
               <input
                 name="pinCode"
                 value={form.pinCode}
                 onChange={handleChange}
-                maxLength={6}
-                inputMode="numeric"
+                maxLength={indianSupplier ? 6 : 10}
+                inputMode={indianSupplier ? "numeric" : "text"}
               />
             </label>
 
@@ -1246,6 +1321,7 @@ export default function SupplierFormPage() {
             )}
           </div>
         </section>
+        </fieldset>
       </form>
     </div>
   );

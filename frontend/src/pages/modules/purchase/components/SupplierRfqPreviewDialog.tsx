@@ -59,7 +59,7 @@ export default function SupplierRfqPreviewDialog({ document, details, onClose }:
           <div className="purchase-rfq-document-subject"><span>Subject</span><strong>{details.subject || "—"}</strong></div>
           <div className="purchase-rfq-document-meta">
             <div><span>Supplier</span><strong>{document.supplierName}</strong><small>{document.supplierCode}</small></div>
-            <div><span>Purchase Enquiry No.</span><strong>{details.enquiryNumber}</strong></div>
+            <div><span>RFQ / Purchase Enquiry No.</span><strong>{details.enquiryNumber}</strong></div>
             <div><span>Enquiry Date</span><strong>{displayDate(details.enquiryDate)}</strong></div>
             <div><span>Quotation Due</span><strong>{displayDate(details.dueDate)}</strong></div>
             <div><span>Delivery Required By</span><strong>{displayDate(details.deliveryRequiredDate)}</strong></div>

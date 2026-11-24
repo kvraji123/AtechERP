@@ -23,10 +23,11 @@ function getSafeInteger(
     maximum
   );
 }
-
 export async function listCustomers({
   search = "",
   activeFlag = "",
+  saveStatus = "",
+  includeDraft = false,
   limit = 20,
   offset = 0,
 } = {}) {
@@ -39,6 +40,14 @@ export async function listCustomers({
   )
     .trim()
     .toUpperCase();
+  const safeSaveStatus = ["DRAFT", "SUBMITTED"].includes(
+    String(saveStatus || "").trim().toUpperCase()
+  )
+    ? String(saveStatus).trim().toUpperCase()
+    : "";
+  const safeIncludeDraft = includeDraft === true || ["Y", "TRUE", "1"].includes(String(includeDraft).trim().toUpperCase())
+    ? "Y"
+    : "N";
 
   const safeLimit = getSafeInteger(
     limit,
@@ -66,6 +75,9 @@ export async function listCustomers({
     safeSearch,
     safeActiveFlag,
     safeActiveFlag,
+    safeSaveStatus,
+    safeSaveStatus,
+    safeIncludeDraft,
   ];
 
   const [rows] = await db.execute(
@@ -84,6 +96,18 @@ export async function listCustomers({
       countRows[0]?.total || 0
     ),
   };
+}
+
+export async function lookupActiveCustomers({ search = "", limit = 20 } = {}) {
+  const safeSearch = String(search || "").trim();
+  if (safeSearch.length < 2) return [];
+
+  const safeLimit = getSafeInteger(limit, 20, 1, 25);
+  const [rows] = await db.execute(
+    `${queries.LOOKUP_ACTIVE_CUSTOMERS}\nLIMIT ${safeLimit}`,
+    [safeSearch, safeSearch, safeSearch]
+  );
+  return rows;
 }
 
 export async function getCustomerById(
@@ -151,6 +175,15 @@ export async function updateCustomerStatus(
       updatedBy,
       Number(customerId),
     ]
+  );
+
+  return result.affectedRows;
+}
+
+export async function hardDeleteInactiveCustomer(connection, customerId) {
+  const [result] = await connection.execute(
+    queries.HARD_DELETE_INACTIVE_CUSTOMER,
+    [Number(customerId)]
   );
 
   return result.affectedRows;

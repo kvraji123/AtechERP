@@ -19,6 +19,13 @@
 .workout-two-column.single { grid-template-columns: 1fr; }
 .workout-result-row { margin: 0 14px 12px; padding: 10px 12px; display: grid; grid-template-columns: 1fr auto auto; gap: 18px; align-items: center; background: #eef2ff; border-radius: 7px; font-weight: 800; }
 .workout-result-row output { min-width: 115px; text-align: right; color: #233b91; }
+.workout-material-cost-summary { padding: 0 14px 12px; }
+.workout-material-cost-summary .workout-result-row { margin: 0; }
+.workout-material-cost-input { width: 128px; min-height: 34px; border: 1px solid #8796c4; border-radius: 6px; padding: 6px 8px; background: #fff; color: #172137; font: inherit; font-size: 13px; font-weight: 700; text-align: right; box-sizing: border-box; }
+.workout-material-cost-input:disabled { background: #f3f5f8; color: #536078; }
+.workout-foreign-material-cost-input { display: inline-flex; align-items: center; gap: 5px; color: #233b91; font-size: 13px; }
+.workout-foreign-material-cost-input .workout-material-cost-input { width: 100px; }
+.workout-material-cost-hint { margin: 6px 2px 0; color: #66738a; font-size: 11px; }
 .workout-result-list { padding: 0 14px 12px; display: grid; gap: 5px; }
 .workout-result-list > div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 8px; font-size: 13px; }
 .workout-result-list .total { border-top: 1px solid #cfd7e6; background: #eef2ff; color: #233b91; font-weight: 800; padding: 9px 8px; }
@@ -26,7 +33,7 @@
 .workout-result-list .total { font-family: inherit; font-size: 13px; font-weight: 800; color: #233b91; }
 .workout-add-line { border: 1px solid #c9342d; color: #b92f29; background: #fff; border-radius: 7px; min-height: 31px; padding: 5px 10px; display: inline-flex; align-items: center; gap: 5px; font-weight: 700; cursor: pointer; }
 .workout-process-table { padding: 10px 14px 13px; }
-.process-head, .process-line { display: grid; grid-template-columns: 1.1fr 1.6fr .7fr 38px; gap: 8px; align-items: center; }
+.process-head, .process-line { display: grid; grid-template-columns: 1.05fr 1.45fr .9fr .9fr 1.05fr 38px; gap: 8px; align-items: center; }
 .process-head { padding: 0 5px 6px; color: #526078; font-size: 11px; font-weight: 800; text-transform: uppercase; }
 .process-line { margin-bottom: 7px; }
 .process-line button { min-height: 36px; border: 0; background: #fff1f0; color: #ba332c; border-radius: 7px; cursor: pointer; }

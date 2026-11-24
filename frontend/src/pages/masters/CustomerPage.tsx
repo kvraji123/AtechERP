@@ -1,10 +1,10 @@
 import { formatListDateTime } from "../../utils/formatDateTime";
 import {
   Building2,
-  Eye,
   Pencil,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -16,24 +16,31 @@ import { useNavigate } from "react-router-dom";
 import { customerApi } from "../../api/customer.api";
 import { apiMessage } from "../../api/client";
 import { useReferenceData } from "../../hooks/useReferenceData";
+import { useAppFeedback } from "../../components/AppFeedback";
+import { useAuth } from "../../context/AuthContext";
 import Pagination, { PAGE_SIZE } from "../../components/Pagination";
 import "./CustomerPage.css";
 type CustomerRow = {
   customerId: number;
   customerCode: string;
   customerName: string;
-  customerType: string;
   plantCode: string;
   gstNumber: string;
   mobileNumber: string;
   email: string;
-  customerStatus: "ACTIVE" | "INACTIVE";
+  customerStatus: "ACTIVE" | "INACTIVE" | "DRAFT";
   lastUpdated?: string | null;
 };
 
 export default function CustomerPage() {
   const referenceData = useReferenceData(["RECORD_STATUS"]);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { confirmDelete, showSuccess } = useAppFeedback();
+  const isAdministrator = String(user?.roleName || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_") === "ADMINISTRATOR";
 
   const [customers, setCustomers] = useState<
     CustomerRow[]
@@ -56,6 +63,8 @@ export default function CustomerPage() {
           pageSize: PAGE_SIZE,
           search,
           activeFlag: status === "ACTIVE" ? "Y" : status === "INACTIVE" ? "N" : "",
+          saveStatus: status === "DRAFT" ? "DRAFT" : status ? "SUBMITTED" : "",
+          includeDraft: true,
         });
         const rows = response?.data ?? [];
         setTotal(Number(response?.meta?.total || 0));
@@ -65,12 +74,11 @@ export default function CustomerPage() {
             customerId: row.customerId,
             customerCode: row.customerCode ?? "",
             customerName: row.customerName ?? "",
-            customerType: row.customerType ?? "",
             plantCode: row.plantCode ?? "",
             gstNumber: row.gstNumber ?? "",
             mobileNumber: row.mobileNumber ?? "",
             email: row.emailAddress ?? "",
-            customerStatus: row.customerStatus ??
+            customerStatus: row.saveStatus === "DRAFT" ? "DRAFT" : row.customerStatus ??
               (row.activeFlag === "N" ? "INACTIVE" : "ACTIVE"),
             lastUpdated: row.lastUpdated ?? null,
           }))
@@ -84,6 +92,42 @@ export default function CustomerPage() {
 
     void loadCustomers();
   }, [page, search, status]);
+
+  const remove = async (customer: CustomerRow) => {
+    const confirmed = await confirmDelete({
+      title: "Delete Customer?",
+      message: `${customer.customerName} will be deactivated and cannot be used in new transactions. Existing documents will be kept.`,
+      confirmLabel: "Deactivate Customer",
+    });
+    if (!confirmed) return;
+    try {
+      setError("");
+      await customerApi.changeStatus(customer.customerId, "INACTIVE");
+      setCustomers((current) => current.filter((row) => row.customerId !== customer.customerId));
+      setTotal((current) => Math.max(0, current - 1));
+      showSuccess("Customer deactivated successfully.");
+    } catch (deleteError) {
+      setError(apiMessage(deleteError));
+    }
+  };
+
+  const hardDelete = async (customer: CustomerRow) => {
+    const confirmed = await confirmDelete({
+      title: "Permanently delete customer?",
+      message: `${customer.customerCode} · ${customer.customerName} will be permanently removed. This cannot be undone. If existing records refer to this customer, deletion will be blocked.`,
+      confirmLabel: "Permanently Delete",
+    });
+    if (!confirmed) return;
+    try {
+      setError("");
+      await customerApi.hardDelete(customer.customerId);
+      setCustomers((current) => current.filter((row) => row.customerId !== customer.customerId));
+      setTotal((current) => Math.max(0, current - 1));
+      showSuccess("Inactive customer permanently deleted.");
+    } catch (deleteError) {
+      setError(apiMessage(deleteError));
+    }
+  };
 
   return (
     <div className="page-container master-list-page">
@@ -136,6 +180,8 @@ export default function CustomerPage() {
           >
             <option value="">All Status</option>
 
+            <option value="DRAFT">Draft</option>
+
             {referenceData.options("RECORD_STATUS").map((option) =>
               <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
@@ -149,7 +195,6 @@ export default function CustomerPage() {
               <tr>
                 <th>Customer Code</th>
                 <th>Customer Name</th>
-                <th>Customer Type</th>
                 <th>Plant Code</th>
                 <th>GST Number</th>
                 <th>Mobile</th>
@@ -164,7 +209,7 @@ export default function CustomerPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={8}>
                     <div className="master-table-message">
                       Loading customers...
                     </div>
@@ -172,7 +217,7 @@ export default function CustomerPage() {
                 </tr>
               ) : customers.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>
+                  <td colSpan={8}>
                     <div className="master-empty-state">
                       <div className="master-empty-icon">
                         <Building2 size={30} />
@@ -205,17 +250,14 @@ export default function CustomerPage() {
                   (customer) => (
                     <tr key={customer.customerId}>
                       <td>
-                        <strong>
-                          {customer.customerCode}
-                        </strong>
+                        <div className="master-record-cell">
+                          <button type="button" className="master-record-edit" title="Edit customer" aria-label={`Edit ${customer.customerCode}`} onClick={() => navigate(`/masters/customers/${customer.customerId}?mode=edit`)}><Pencil size={15} /></button>
+                          <button type="button" className="master-record-link" title="View customer" onClick={() => navigate(`/masters/customers/${customer.customerId}?mode=view`)}>{customer.customerCode}</button>
+                        </div>
                       </td>
 
                       <td>
                         {customer.customerName}
-                      </td>
-
-                      <td>
-                        {customer.customerType}
                       </td>
 
                       <td>
@@ -249,24 +291,12 @@ export default function CustomerPage() {
                         <div className="master-row-actions">
                           <button
                             type="button"
-                            title="View customer"
-                            onClick={() =>
-                              navigate(`/masters/customers/${customer.customerId}`)
-                            }
+                            title={customer.customerStatus === "ACTIVE" ? "Deactivate customer" : isAdministrator ? "Permanently delete inactive customer" : "Only administrators can permanently delete inactive customers"}
+                            aria-label={customer.customerStatus === "ACTIVE" ? `Deactivate ${customer.customerCode}` : `Permanently delete ${customer.customerCode}`}
+                            disabled={customer.customerStatus !== "ACTIVE" && !isAdministrator}
+                            onClick={() => void (customer.customerStatus === "ACTIVE" ? remove(customer) : hardDelete(customer))}
                           >
-                            <Eye size={16} />
-                          </button>
-
-                          <button
-                            type="button"
-                            title="Edit customer"
-                            onClick={() =>
-                              navigate(
-                                `/masters/customers/${customer.customerId}`
-                              )
-                            }
-                          >
-                            <Pencil size={16} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </td>

@@ -1,8 +1,27 @@
 -- External calibration dispatch batches.
 -- Each header is the dispatch challan, while individual Gauge IDs remain linked through gauge_history.
 
-ALTER TABLE gauge_movement_batches
-  MODIFY COLUMN movement_type ENUM('ISSUE','RETURN','CALIBRATION_DISPATCH') NOT NULL;
+-- Do not replace the existing ENUM definition. Older installations can contain
+-- additional, valid movement types. Append the new value while keeping every
+-- value already present in production.
+SET @atech_gauge_movement_type_sql := COALESCE((
+  SELECT IF(
+    LOCATE('''CALIBRATION_DISPATCH''', COLUMN_TYPE) > 0,
+    'SELECT 1',
+    CONCAT(
+      'ALTER TABLE gauge_movement_batches MODIFY COLUMN movement_type ',
+      REPLACE(COLUMN_TYPE, ')', ',''CALIBRATION_DISPATCH'')'),
+      ' NOT NULL'
+    )
+  )
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'gauge_movement_batches'
+    AND COLUMN_NAME = 'movement_type'
+), 'SELECT 1');
+PREPARE atech_gauge_movement_type_statement FROM @atech_gauge_movement_type_sql;
+EXECUTE atech_gauge_movement_type_statement;
+DEALLOCATE PREPARE atech_gauge_movement_type_statement;
 
 ALTER TABLE gauge_movement_batches
   ADD COLUMN calibration_agency VARCHAR(180) NULL AFTER issued_to;

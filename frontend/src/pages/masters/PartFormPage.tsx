@@ -5,12 +5,14 @@ import {
   Box,
   Boxes,
   ExternalLink,
+  GitBranch,
   Network,
   Package,
   PackageSearch,
   Plus,
   Save,
   Send,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
@@ -21,6 +23,7 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 
 import {
@@ -33,7 +36,17 @@ import { attachmentApi, type StoredAttachment } from "../../api/attachment.api";
 import { itemApi } from "../../api/item.api";
 import { partApi } from "../../api/part.api";
 import type { BomSearchOption, ProcessMasters } from "../../api/part.api";
-import { blankProcessPlan, type ProcessPlanForm } from "./PartProcessPlanEditor";
+import {
+  blankProcessDocumentApprovals,
+  blankProcessPlan,
+  getProcessPlanApprovalIssues,
+  processPlanApprovalIssueMessage,
+  type ProgramForm,
+  type ProcessInstructionAttachment,
+  type ProcessPlanForm,
+  type ProcessPlanSaveOptions,
+  type ToolListForm,
+} from "./PartProcessPlanEditor";
 import PartProcessPlanVariantsEditor from "./PartProcessPlanVariantsEditor";
 import { apiMessage } from "../../api/client";
 import { useReferenceData } from "../../hooks/useReferenceData";
@@ -44,6 +57,9 @@ import "./PartFormPage.css";
 type PartAttachmentType =
   | "CUSTOMER_DRAWING"
   | "CUSTOMER_STANDARD"
+  | "PART_MODEL"
+  | "BALLOONED_DRAWING"
+  | "PATTERN_DIE_DRAWING"
   | "OTHER";
 
 type PartAttachment = {
@@ -54,6 +70,80 @@ type PartAttachment = {
   fileName?: string;
   fileUrl?: string;
 };
+
+const toolListText = (value: unknown) => value === null || value === undefined ? "" : String(value);
+
+function normalizeToolList(input: unknown): ToolListForm | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const source = input as Record<string, unknown>;
+  const fields = (row: unknown, keys: string[]) => {
+    const sourceRow = row && typeof row === "object" && !Array.isArray(row)
+      ? row as Record<string, unknown>
+      : {};
+    return Object.fromEntries(keys.map((key) => [key, toolListText(sourceRow[key])]));
+  };
+
+  return {
+    documentDate: toolListText(source.documentDate),
+    fixtureNumber: toolListText(source.fixtureNumber),
+    material: toolListText(source.material),
+    preparedBy: toolListText(source.preparedBy),
+    checkedBy: toolListText(source.checkedBy),
+    approvedBy: toolListText(source.approvedBy),
+    lastRevisionDate: toolListText(source.lastRevisionDate),
+    signature: toolListText(source.signature),
+    remarks: toolListText(source.remarks),
+    toolRows: Array.isArray(source.toolRows) ? source.toolRows.map((row) => fields(row, [
+      "toolDiameter", "toolName", "rpm", "feed", "holderName", "holderLength", "colletSize",
+      "toolInsertSpecification", "toolMake", "toolNumber", "toolClampingDetail",
+      "heightOffset", "toolFluteLength", "toolOverhangDetails", "toolLife",
+    ]) as ToolListForm["toolRows"][number]) : [],
+    costRows: Array.isArray(source.costRows) ? source.costRows.map((row) => fields(row, [
+      "toolDiameter", "toolName", "insertSpecification", "insertOrToolRate", "numberOfEdges",
+      "numberOfPockets", "toolLifePerEdge", "lifeOfOverallEdge",
+    ]) as ToolListForm["costRows"][number]) : [],
+  };
+}
+
+function normalizeProgram(input: unknown, legacyProgramNumber: unknown): ProgramForm | null {
+  const fallbackProgramNumber = toolListText(legacyProgramNumber);
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return fallbackProgramNumber ? {
+      programNumber: fallbackProgramNumber,
+      programText: "",
+      revisionNumber: 0,
+      revisionHistory: [],
+    } : null;
+  }
+  const source = input as Record<string, unknown>;
+  const revisions = Array.isArray(source.revisionHistory) ? source.revisionHistory.map((entry) => {
+    const revision = entry && typeof entry === "object" && !Array.isArray(entry)
+      ? entry as Record<string, unknown>
+      : {};
+    return {
+      revisionNumber: Number(revision.revisionNumber || 0),
+      changedBy: toolListText(revision.changedBy),
+      changedOn: toolListText(revision.changedOn),
+    };
+  }).filter((entry) => entry.revisionNumber > 0) : [];
+  return {
+    programNumber: toolListText(source.programNumber) || fallbackProgramNumber,
+    programText: toolListText(source.programText),
+    revisionNumber: Number(source.revisionNumber || 0),
+    revisionHistory: revisions,
+  };
+}
+
+function normalizeDocumentApprovals(input: unknown) {
+  const source = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  return {
+    program: source.program === true,
+    toolList: source.toolList === true,
+    workInstructions: source.workInstructions === true,
+  };
+}
 
 type PartFormData = {
   customerId: string;
@@ -80,6 +170,8 @@ type PartFormData = {
   uomId: string;
 
   partStatus: string;
+  revisionSourcePartId: string;
+  bomReleaseStatus: string;
   projectName: string;
 
   createBillOfMaterial: boolean;
@@ -93,6 +185,24 @@ type CustomerOption = {
   customerId: number;
   customerCode: string;
   customerName: string;
+};
+
+const partAttachmentTypeOptions: Array<{ value: PartAttachmentType; label: string }> = [
+  { value: "CUSTOMER_DRAWING", label: "Customer Drawing" },
+  { value: "CUSTOMER_STANDARD", label: "Customer Standard" },
+  { value: "PART_MODEL", label: "Part Model (STEP/STP only)" },
+  { value: "BALLOONED_DRAWING", label: "Ballooned Drawing" },
+  { value: "PATTERN_DIE_DRAWING", label: "Pattern / Die Drawing" },
+  { value: "OTHER", label: "Other" },
+];
+
+const isStepFile = (fileName: string) => /\.(step|stp)$/i.test(fileName);
+
+type RevisionCloneForm = {
+  partNumber: string;
+  drawingNumber: string;
+  drawingRevisionNumber: string;
+  drawingRevisionDate: string;
 };
 
 type BomComponent = BomSearchOption & {
@@ -199,6 +309,95 @@ function storedAttachments(attachments: StoredAttachment[]): PartAttachment[] {
     : [createAttachment()];
 }
 
+function storedInstructionAttachments(attachments: StoredAttachment[]): ProcessInstructionAttachment[] {
+  return attachments
+    .filter((attachment) => attachment.attachmentType === "WORK_INSTRUCTION")
+    .map((attachment) => ({
+      attachmentId: Number(attachment.attachmentId),
+      attachmentType: "WORK_INSTRUCTION",
+      attachmentName: attachment.attachmentName || attachment.fileName,
+      file: null,
+      fileName: attachment.fileName,
+      fileUrl: attachment.fileUrl,
+    }));
+}
+
+async function hydrateProcessInstructionAttachments(processPlans: ProcessPlanForm[]) {
+  const definitionIds = [...new Set(processPlans.flatMap((plan) => plan.operations
+    .map((operation) => Number(operation.processDefinitionId || 0))
+    .filter(Boolean)))];
+  if (!definitionIds.length) return processPlans;
+  const responses = await Promise.all(definitionIds.map(async (definitionId) => ({
+    definitionId,
+    response: await attachmentApi.list("PART_PROCESS_DEFINITION", definitionId),
+  })));
+  const attachmentsByDefinition = new Map(responses.map(({ definitionId, response }) => {
+    const attachments = Array.isArray(response?.data) ? response.data : [];
+    return [definitionId, storedInstructionAttachments(attachments)];
+  }));
+  return processPlans.map((plan) => ({
+    ...plan,
+    operations: plan.operations.map((operation) => {
+      const attachments = attachmentsByDefinition.get(Number(operation.processDefinitionId || 0));
+      return {
+        ...operation,
+        instructionAttachments: attachments || [],
+      };
+    }),
+  }));
+}
+
+function carryProcessInstructionAttachments(sourcePlans: ProcessPlanForm[], savedPlans: ProcessPlanForm[]) {
+  return savedPlans.map((savedPlan, planIndex) => {
+    const sourcePlan = sourcePlans.find((plan) => plan.processPlanId && plan.processPlanId === savedPlan.processPlanId)
+      || sourcePlans[planIndex];
+    return {
+      ...savedPlan,
+      operations: savedPlan.operations.map((savedOperation, operationIndex) => {
+        const sourceOperation = sourcePlan?.operations.find((operation) => operation.processDefinitionId
+          && operation.processDefinitionId === savedOperation.processDefinitionId)
+          || sourcePlan?.operations[operationIndex];
+        return {
+          ...savedOperation,
+          instructionAttachments: (sourceOperation?.instructionAttachments || []).map((attachment) => ({ ...attachment })),
+        };
+      }),
+    };
+  });
+}
+
+async function saveProcessInstructionAttachments(processPlans: ProcessPlanForm[]) {
+  const uploads = new Map<string, Promise<StoredAttachment>>();
+  const saveAttachment = async (operation: ProcessPlanForm["operations"][number], attachment: ProcessInstructionAttachment) => {
+    if (!attachment.file) return attachment;
+    const definitionId = Number(operation.processDefinitionId || 0);
+    if (!definitionId) throw new Error("The process operation must be saved before its work instructions can be attached.");
+    const uploadKey = [definitionId, attachment.file.name, attachment.file.size, attachment.file.lastModified, attachment.attachmentName].join(":");
+    if (!uploads.has(uploadKey)) {
+      uploads.set(uploadKey, attachmentApi.upload("PART_PROCESS_DEFINITION", definitionId, attachment.file, {
+        attachmentType: "WORK_INSTRUCTION",
+        attachmentName: attachment.attachmentName || attachment.file.name,
+      }).then((response) => response.data as StoredAttachment));
+    }
+    const stored = await uploads.get(uploadKey)!;
+    return {
+      attachmentId: Number(stored.attachmentId),
+      attachmentType: "WORK_INSTRUCTION" as const,
+      attachmentName: stored.attachmentName || stored.fileName,
+      file: null,
+      fileName: stored.fileName,
+      fileUrl: stored.fileUrl,
+    };
+  };
+  return Promise.all(processPlans.map(async (plan) => ({
+    ...plan,
+    operations: await Promise.all(plan.operations.map(async (operation) => ({
+      ...operation,
+      instructionAttachments: await Promise.all(operation.instructionAttachments.map((attachment) => saveAttachment(operation, attachment))),
+    }))),
+  })));
+}
+
 const initialForm: PartFormData = {
   customerId: "",
   customerCode: "",
@@ -220,10 +419,12 @@ const initialForm: PartFormData = {
   gradeId: "",
 
   partWeight: "",
-  unitOfMeasurement: "KG",
+  unitOfMeasurement: "",
   uomId: "",
 
   partStatus: "ACTIVE",
+  revisionSourcePartId: "",
+  bomReleaseStatus: "NOT_REQUIRED",
   projectName: "",
 
   createBillOfMaterial: false,
@@ -234,7 +435,7 @@ const initialForm: PartFormData = {
 };
 
 const emptyProcessMasters:ProcessMasters = { operations:[],sources:[],machineTypes:[],characteristics:[],
-  instruments:[],toleranceGrades:[],sampleSizes:[],frequencies:[] };
+  instruments:[],toleranceGrades:[],toleranceStandards:[],toleranceStandardBands:[],sampleSizes:[],frequencies:[] };
 
 function mapProcessPlan(data:any):ProcessPlanForm {
   if (!data) return blankProcessPlan();
@@ -246,16 +447,17 @@ function mapProcessPlan(data:any):ProcessPlanForm {
       characteristicSearch:entry.characteristicText || entry.characteristicName || "",
       specifiedDimension:String(entry.specifiedDimension ?? ""),toleranceMode:entry.toleranceMode ?? "MANUAL",
       toleranceGradeId:String(entry.toleranceGradeId ?? ""),toleranceGradeText:entry.toleranceGradeText ?? entry.toleranceGradeCode ?? "",
+      toleranceStandardId:String(entry.toleranceStandardId ?? ""),
       toleranceMinus:String(entry.toleranceMinus ?? ""),
       tolerancePlus:String(entry.tolerancePlus ?? ""),lsl:String(entry.lsl ?? ""),usl:String(entry.usl ?? ""),
       drawingGrid:entry.drawingGrid ?? "",instrumentMasterId:String(entry.instrumentMasterId ?? ""),
       sampleSize:entry.sampleSize ?? "",inspectionFrequency:entry.inspectionFrequency ?? "",
       scCcIdentification:entry.scCcIdentification === "Y" || entry.scCcIdentification === true,
+      patrolInspectionQaRequired:entry.patrolInspectionQaRequired === "Y" || entry.patrolInspectionQaRequired === true,
       periodicOperatorRequired:entry.periodicOperatorRequired === "Y" || entry.periodicOperatorRequired === true,
       finalInspectionRequired:entry.finalInspectionRequired === "Y" || entry.finalInspectionRequired === true,
     })) : [];
-    const ready = characteristics.length > 0 && characteristics.every((entry) =>
-      entry.scCcIdentification && entry.periodicOperatorRequired && entry.finalInspectionRequired);
+    const ready = characteristics.length > 0;
     const sourceType = row.sourceType === "OUTSOURCE" ? "OUTSOURCE" as const:"INHOUSE" as const;
     return {
       processOperationId:Number(row.processOperationId || 0) || undefined,
@@ -269,10 +471,14 @@ function mapProcessPlan(data:any):ProcessPlanForm {
       clampingTimeSeconds:sourceType === "INHOUSE" ? String(row.clampingTimeSeconds ?? ""):"",
       settingTimeHours:sourceType === "INHOUSE" ? String(row.settingTimeHours ?? ""):"",
       outsourceCostInr:sourceType === "OUTSOURCE" ? String(row.outsourceCostInr ?? row.processCostInr ?? ""):"",
-      processCostInr:String(row.processCostInr ?? "0"),inspectionPlan:row.inspectionPlan ? {
+      processCostInr:String(row.processCostInr ?? "0"),
+      toolList:normalizeToolList(row.toolList),program:normalizeProgram(row.program, row.programNumber),programNumber:row.program?.programNumber ?? row.programNumber ?? "",documentApprovals:row.documentApprovals ? normalizeDocumentApprovals(row.documentApprovals) : blankProcessDocumentApprovals(),instructionAttachments:[],inspectionPlan:row.inspectionPlan ? {
         inspectionPlanId:Number(row.inspectionPlan.inspectionPlanId || 0) || undefined,
         planStatus:ready ? "READY":"DRAFT",
+        approvalStatus:row.inspectionPlan.approvalStatus === "APPROVED" ? "APPROVED" : "DRAFT",
         cmmRequired:row.inspectionPlan.cmmRequired === "Y" || row.inspectionPlan.cmmRequired === true,
+        measurementUnit:row.inspectionPlan.measurementUnit === "INCH" ? "INCH" : "MM",
+        toleranceStandardId:String(row.inspectionPlan.toleranceStandardId ?? ""),
         characteristics,
       }:null,
     };
@@ -295,7 +501,7 @@ function mapProcessPlans(data:any):ProcessPlanForm[] {
 export default function PartFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { confirmDelete } = useAppFeedback();
+  const { confirmAction, confirmDelete, showError, showSuccess } = useAppFeedback();
   const { id } = useParams();
   const partId = Number(id || 0);
 
@@ -308,10 +514,18 @@ export default function PartFormPage() {
   const [saving, setSaving] = useState<
     "DRAFT" | "SUBMIT" | null
   >(null);
+  const [revisionClone, setRevisionClone] = useState<RevisionCloneForm | null>(null);
+  const [revisionCloning, setRevisionCloning] = useState(false);
+  const [bomReleasing, setBomReleasing] = useState(false);
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerOptions, setCustomerOptions] = useState<CustomerOption[]>([]);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [activeCustomerIndex, setActiveCustomerIndex] = useState(-1);
+  const customerOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [bomComponents, setBomComponents] = useState<BomComponent[]>([]);
   const [processPlans,setProcessPlans] = useState<ProcessPlanForm[]>([]);
   const [processMasters,setProcessMasters] = useState<ProcessMasters>(emptyProcessMasters);
@@ -328,27 +542,19 @@ export default function PartFormPage() {
   const [hierarchyDetailError, setHierarchyDetailError] = useState("");
   const hierarchyDetailRequestId = useRef(0);
   const referenceData = useReferenceData([
-    "RECORD_STATUS", "PART_CATEGORY", "DRAWING_CODE_MODE", "PART_ATTACHMENT_TYPE",
+    "RECORD_STATUS", "PART_CATEGORY", "DRAWING_CODE_MODE",
   ]);
-  const availableGrades = referenceData.grades.filter(
-    (grade) => String(grade.materialId) === form.materialId
-  );
-
   const unsaved = useUnsavedChanges({form,bomComponents,processPlans});
+  const defaultActiveProcessPlan = processPlans.find((plan) =>
+    plan.activeFlag === "Y" && plan.isDefault
+  );
+  const defaultProcessPlanReleased =
+    defaultActiveProcessPlan?.planStatus === "APPROVED";
+  const defaultProcessPlanApprovalIssues = getProcessPlanApprovalIssues(defaultActiveProcessPlan?.operations || []);
+  const defaultProcessPlanReadyForRelease = defaultProcessPlanApprovalIssues.length === 0;
 
   useEffect(() => {
     let mounted = true;
-
-    customerApi
-      .list({ activeFlag: "Y", pageSize: 100 })
-      .then((response) => {
-        if (mounted) {
-          setCustomers(Array.isArray(response?.data) ? response.data : []);
-        }
-      })
-      .catch((loadError) => {
-        if (mounted) setError(apiMessage(loadError));
-      });
 
     partApi.getProcessMasters().then((response) => {
       if (mounted) setProcessMasters(response?.data ?? emptyProcessMasters);
@@ -362,6 +568,8 @@ export default function PartFormPage() {
   useEffect(() => {
     if (!partId) {
       setForm(initialForm);
+      setCustomerSearch("");
+      setActiveCustomerIndex(-1);
       setBomComponents([]);
       setProcessPlans([]);
       return;
@@ -373,7 +581,7 @@ export default function PartFormPage() {
       partApi.getById(partId),
       attachmentApi.list("PART", partId),
     ])
-      .then(([response, attachmentResponse]) => {
+      .then(async ([response, attachmentResponse]) => {
         if (!mounted) return;
         const data = response?.data ?? {};
         const date = data.drawing_revision_date ?? data.drawingRevisionDate;
@@ -391,7 +599,8 @@ export default function PartFormPage() {
             }))
           : [];
         setBomComponents(loadedBomComponents);
-        const loadedProcessPlans=mapProcessPlans(data);
+        const loadedProcessPlans = await hydrateProcessInstructionAttachments(mapProcessPlans(data));
+        if (!mounted) return;
         setProcessPlans(loadedProcessPlans);
         setForm({
           customerId: String(data.customer_id ?? data.customerId ?? ""),
@@ -416,12 +625,17 @@ export default function PartFormPage() {
             data.unit_of_measurement ?? data.unitOfMeasurement ?? "KG",
           uomId: String(data.uom_id ?? data.uomId ?? ""),
           partStatus: data.part_status ?? data.partStatus ?? "ACTIVE",
+          revisionSourcePartId: String(data.revision_source_part_id ?? data.revisionSourcePartId ?? ""),
+          bomReleaseStatus: data.bom_release_status ?? data.bomReleaseStatus ?? "NOT_REQUIRED",
           projectName: data.project_name ?? data.projectName ?? "",
-          createBillOfMaterial: loadedBomComponents.length > 0,
+          createBillOfMaterial:
+            String(data.bom_required ?? data.bomRequired ?? "").toUpperCase() === "Y"
+            || loadedBomComponents.length > 0,
           createProcessFlow: loadedProcessPlans.length > 0,
           createInspectionPlan: loadedProcessPlans.some((plan) => plan.operations.some((row) => Boolean(row.inspectionPlan))),
           attachments: storedAttachments(Array.isArray(attachmentResponse?.data) ? attachmentResponse.data : []),
         });
+        setCustomerSearch([data.customer_code ?? data.customerCode, data.customer_name ?? data.customerName].filter(Boolean).join(" - "));
       })
       .catch((loadError) => {
         if (mounted) setError(apiMessage(loadError));
@@ -433,16 +647,65 @@ export default function PartFormPage() {
   }, [partId]);
 
   useEffect(() => {
+    const search = customerSearch.trim();
+    const selectedLabel = [form.customerCode, form.customerName].filter(Boolean).join(" - ");
+    if (isViewMode || search.length < 2 || (form.customerId && search === selectedLabel)) {
+      setCustomerOptions([]);
+      setActiveCustomerIndex(-1);
+      setCustomerSearchLoading(false);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setCustomerSearchLoading(true);
+      customerApi.lookup(search)
+        .then((response) => {
+          if (active) {
+            setCustomerOptions(Array.isArray(response?.data) ? response.data : []);
+            setActiveCustomerIndex(-1);
+          }
+        })
+        .catch((loadError) => {
+          if (active) setError(apiMessage(loadError));
+        })
+        .finally(() => {
+          if (active) setCustomerSearchLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [customerSearch, form.customerCode, form.customerId, form.customerName, isViewMode]);
+
+  useEffect(() => {
+    if (activeCustomerIndex >= customerOptions.length) setActiveCustomerIndex(-1);
+  }, [activeCustomerIndex, customerOptions.length]);
+
+  useEffect(() => {
+    if (activeCustomerIndex >= 0) {
+      customerOptionRefs.current[activeCustomerIndex]?.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeCustomerIndex, customerOptions]);
+
+  useEffect(() => {
     const hasInspection=processPlans.some((plan) => plan.operations.some((row) => Boolean(row.inspectionPlan)));
     setForm((current) => current.createInspectionPlan === hasInspection ? current
       : {...current,createInspectionPlan:hasInspection});
   },[processPlans]);
 
   useEffect(() => {
-    if (isViewMode || !form.createBillOfMaterial || !bomSearchOpen) return;
+    const search = bomSearch.trim();
+    if (isViewMode || !form.createBillOfMaterial || !bomSearchOpen || search.length < 2) {
+      if (search.length < 2) setBomOptions([]);
+      setBomSearchLoading(false);
+      return;
+    }
     const timer = window.setTimeout(() => {
       setBomSearchLoading(true);
-      partApi.searchBomOptions({ search: bomSearch.trim(), excludePartId: partId || undefined })
+      partApi.searchBomOptions({ search, excludePartId: partId || undefined })
         .then((response) => setBomOptions(Array.isArray(response?.data) ? response.data : []))
         .catch((loadError) => setError(apiMessage(loadError)))
         .finally(() => setBomSearchLoading(false));
@@ -483,24 +746,56 @@ export default function PartFormPage() {
     setMessage("");
   };
 
-  const handleCustomerChange = (
-    event: ChangeEvent<HTMLSelectElement>
-  ) => {
-    const value = event.target.value;
+  const handleCustomerSearch = (value: string) => {
+    setCustomerSearch(value);
+    setCustomerSearchOpen(value.trim().length >= 2);
+    setActiveCustomerIndex(-1);
+    setForm((current) => current.customerId
+      ? { ...current, customerId: "", customerCode: "", customerName: "" }
+      : current);
+    setError("");
+  };
 
-    const selectedCustomer =
-      event.target.options[
-        event.target.selectedIndex
-      ];
-
+  const selectCustomer = (customer: CustomerOption) => {
     setForm((current) => ({
       ...current,
-      customerId: value,
-      customerCode:
-        selectedCustomer.dataset.code ?? "",
-      customerName:
-        selectedCustomer.dataset.name ?? "",
+      customerId: String(customer.customerId),
+      customerCode: customer.customerCode,
+      customerName: customer.customerName,
     }));
+    setCustomerSearch(`${customer.customerCode} - ${customer.customerName}`);
+    setCustomerOptions([]);
+    setCustomerSearchOpen(false);
+    setActiveCustomerIndex(-1);
+  };
+
+  const handleCustomerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (isViewMode) return;
+
+    if (event.key === "Escape") {
+      setCustomerSearchOpen(false);
+      setActiveCustomerIndex(-1);
+      return;
+    }
+
+    if (event.key === "Enter" && activeCustomerIndex >= 0 && customerOptions[activeCustomerIndex]) {
+      event.preventDefault();
+      selectCustomer(customerOptions[activeCustomerIndex]);
+      return;
+    }
+
+    if (!customerSearch.trim() || customerSearch.trim().length < 2 || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+
+    event.preventDefault();
+    setCustomerSearchOpen(true);
+    if (!customerOptions.length) return;
+
+    setActiveCustomerIndex((current) => {
+      if (current < 0) return event.key === "ArrowDown" ? 0 : customerOptions.length - 1;
+      return event.key === "ArrowDown"
+        ? (current + 1) % customerOptions.length
+        : (current - 1 + customerOptions.length) % customerOptions.length;
+    });
   };
 
   const handleDrawingModeChange = (
@@ -548,6 +843,25 @@ export default function PartFormPage() {
             : attachment
       ),
     }));
+  };
+
+  const updateAttachmentType = (index: number, attachmentType: PartAttachmentType) => {
+    const attachment = form.attachments[index];
+    const fileName = attachment?.file?.name || attachment?.fileName || "";
+    if (attachmentType === "PART_MODEL" && fileName && !isStepFile(fileName)) {
+      setError("Part Model accepts only STEP or STP files. Select a STEP/STP file before changing the document type.");
+      return;
+    }
+    updateAttachment(index, "attachmentType", attachmentType);
+  };
+
+  const selectAttachmentFile = (index: number, file: File | null) => {
+    const attachment = form.attachments[index];
+    if (file && attachment?.attachmentType === "PART_MODEL" && !isStepFile(file.name)) {
+      setError("Part Model accepts only STEP or STP files.");
+      return;
+    }
+    updateAttachment(index, "file", file);
   };
 
   const removeAttachment = async (index: number) => {
@@ -781,6 +1095,8 @@ export default function PartFormPage() {
   const validate = (
     action: "DRAFT" | "SUBMIT"
   ) => {
+    if (action === "DRAFT") return true;
+
     if (!form.partName.trim()) {
       setError("Part name is required.");
       return false;
@@ -793,14 +1109,6 @@ export default function PartFormPage() {
 
     if (!form.partCategory) {
       setError("Part category is required.");
-      return false;
-    }
-
-    if (
-      form.partCategory === "MACHINING" &&
-      !form.materialSpecification.trim()
-    ) {
-      setError("Material specification is required for Machining parts.");
       return false;
     }
 
@@ -827,10 +1135,113 @@ export default function PartFormPage() {
     return true;
   };
 
+  const openRevisionClone = () => {
+    setRevisionClone({
+      partNumber: `${form.partNumber}-REV`,
+      drawingNumber: form.drawingNumber,
+      drawingRevisionNumber: form.drawingRevisionNumber,
+      drawingRevisionDate: form.drawingRevisionDate,
+    });
+    setError("");
+  };
+
+  const createRevisionClone = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!revisionClone || !partId) return;
+    if (!revisionClone.partNumber.trim()) {
+      setError("New Part Number is required for a drawing revision.");
+      return;
+    }
+    if (!revisionClone.drawingRevisionNumber.trim()) {
+      setError("New Drawing Revision Number is required.");
+      return;
+    }
+    const drawingCode = form.drawingCode.trim()
+      || revisionClone.drawingNumber.trim()
+      || form.partNumber.trim();
+    if (!await confirmAction({
+      title: "Create drawing revision?",
+      message: `Create revision ${revisionClone.drawingRevisionNumber.trim()} for drawing code ${drawingCode}? The current Part will become inactive after the revision is created.`,
+      confirmLabel: "Create Revision",
+      cancelLabel: "Cancel",
+    })) return;
+    try {
+      setRevisionCloning(true);
+      setError("");
+      const response = await partApi.cloneForRevision(partId, {
+        partNumber: revisionClone.partNumber.trim(),
+        drawingNumber: revisionClone.drawingNumber.trim() || null,
+        drawingRevisionNumber: revisionClone.drawingRevisionNumber.trim(),
+        drawingRevisionDate: revisionClone.drawingRevisionDate || null,
+      });
+      const newPartId = Number(response?.data?.part_id ?? response?.data?.partId ?? 0);
+      if (!newPartId) throw new Error("Drawing revision was created but its Part ID was not returned.");
+      setRevisionClone(null);
+      showSuccess("Drawing revision created. The original Part is now inactive.");
+      navigate(`/masters/parts/${newPartId}?mode=edit`, { replace: true });
+    } catch (cloneError) {
+      setError(apiMessage(cloneError));
+    } finally {
+      setRevisionCloning(false);
+    }
+  };
+
+  const releaseRevisionBom = async () => {
+    if (!partId) return;
+    try {
+      setBomReleasing(true);
+      setError("");
+      const response = await partApi.releaseRevisionBom(partId);
+      const data = response?.data ?? {};
+      setForm((current) => ({
+        ...current,
+        partStatus: data.part_status ?? data.partStatus ?? current.partStatus,
+        bomReleaseStatus: data.bom_release_status ?? data.bomReleaseStatus ?? "RELEASED",
+      }));
+      showSuccess(response?.message ?? "Bill of Material approved and released.");
+    } catch (releaseError) {
+      setError(apiMessage(releaseError));
+    } finally {
+      setBomReleasing(false);
+    }
+  };
+
+  const releaseDefaultProcessPlan = async () => {
+    const planIndex = processPlans.findIndex((plan) =>
+      plan.activeFlag === "Y" && plan.isDefault
+    );
+    if (planIndex < 0) {
+      setError("Add an active default Process Plan before releasing it.");
+      return;
+    }
+    if (!defaultProcessPlanReadyForRelease) {
+      showError(processPlanApprovalIssueMessage(defaultProcessPlanApprovalIssues));
+      return;
+    }
+    if (!await confirmAction({
+      title: "Approve & Release Process Plan?",
+      message: "Every operation has an approved Program, Tool List, Work Instructions and Inspection Plan. Click Update to save the release.",
+      confirmLabel: "Approve & Release",
+    })) return;
+
+    setProcessPlans((current) => current.map((plan, index) =>
+      index === planIndex ? { ...plan, planStatus: "APPROVED" } : plan
+    ));
+    showSuccess("Process Plan approved. Click Update to save the release.");
+  };
+
   const savePart = async (
-    action: "DRAFT" | "SUBMIT"
+    action: "DRAFT" | "SUBMIT",
+    processPlansOverride?: ProcessPlanForm[],
+    saveOptions: ProcessPlanSaveOptions = {}
   ) => {
     if (isViewMode) return false;
+
+    const documentOnly = Boolean(saveOptions.documentOnly);
+    if (documentOnly && !isEditMode) {
+      setError("Save the Part before updating its Program, Tool List or Work Instructions.");
+      return false;
+    }
 
     if (!validate(action)) {
       return false;
@@ -840,8 +1251,13 @@ export default function PartFormPage() {
       setSaving(action);
       setError("");
       setMessage("");
+      const plansToSave = processPlansOverride ?? processPlans;
+      const skipPartAttachments = Boolean(saveOptions.skipAttachments || saveOptions.skipPartAttachments);
+      const skipWorkInstructionAttachments = Boolean(saveOptions.skipAttachments || saveOptions.skipWorkInstructionAttachments);
 
       const payload = {
+        action,
+        documentOnly,
         customerId: Number(form.customerId),
         partCategory: form.partCategory,
         partName: form.partName.trim(),
@@ -868,6 +1284,7 @@ export default function PartFormPage() {
         unitOfMeasurement: form.unitOfMeasurement || null,
         uomId: form.uomId ? Number(form.uomId) : null,
         projectName: form.projectName.trim() || null,
+        bomRequired: form.createBillOfMaterial,
         bomComponents: form.createBillOfMaterial
           ? bomComponents.map((row) => ({
               componentType: row.componentType,
@@ -875,20 +1292,23 @@ export default function PartFormPage() {
               quantity: Number(row.quantity),
             }))
           : [],
-        processPlans: form.createProcessFlow ? processPlans.map((processPlan) => ({
+        processPlans: form.createProcessFlow ? plansToSave.map((processPlan) => ({
           ...processPlan,drawingRevisionNumber:form.drawingRevisionNumber || null,
           productionCapacityPerDay:processPlan.productionCapacityPerDay || null,
-          operations:processPlan.operations.map((row) => ({...row,
+          operations:processPlan.operations.map(({ instructionAttachments: _instructionAttachments, ...row }) => ({...row,
+            workInstructionCount: _instructionAttachments.length,
             operationNumber:Number(row.operationNumber),operationMasterId:Number(row.operationMasterId),
             machineTypeId:row.machineTypeId ? Number(row.machineTypeId):null,
             cycleTimeSeconds:row.cycleTimeSeconds || null,clampingTimeSeconds:row.clampingTimeSeconds || null,
             settingTimeHours:row.settingTimeHours || null,
             outsourceCostInr:row.outsourceCostInr || null,
             inspectionPlan:row.inspectionPlan ? {...row.inspectionPlan,
+              toleranceStandardId:row.inspectionPlan.toleranceStandardId ? Number(row.inspectionPlan.toleranceStandardId):null,
               characteristics:row.inspectionPlan.characteristics.map((entry) => ({...entry,
                 characteristicMasterId:entry.characteristicMasterId ? Number(entry.characteristicMasterId):null,
                 characteristicText:entry.characteristicMasterId ? null:entry.characteristicText.trim() || null,
                 toleranceGradeId:entry.toleranceGradeId ? Number(entry.toleranceGradeId):null,
+                toleranceStandardId:entry.toleranceStandardId ? Number(entry.toleranceStandardId):null,
                 instrumentMasterId:entry.instrumentMasterId ? Number(entry.instrumentMasterId):null,
               }))}:null,
           })),
@@ -898,22 +1318,23 @@ export default function PartFormPage() {
       const response = isEditMode
         ? await partApi.update(partId, payload)
         : await partApi.create(payload);
-      const savedProcessPlans = response?.data ? mapProcessPlans(response.data) : processPlans;
-      if (response?.data) setProcessPlans(savedProcessPlans);
+      const responseProcessPlans = response?.data ? mapProcessPlans(response.data) : plansToSave;
+      const savedProcessPlans = carryProcessInstructionAttachments(plansToSave, responseProcessPlans);
       const savedId = Number(
         response?.data?.part_id ?? response?.data?.partId ?? partId
       );
 
       if (!savedId) throw new Error("Part was saved but its identifier was not returned.");
 
-      if (savedId && (isEditMode || form.partStatus === "INACTIVE")) {
+      const savedStatus = response?.data?.part_status ?? response?.data?.partStatus ?? form.partStatus;
+      if (savedId && isEditMode && ["ACTIVE", "INACTIVE"].includes(form.partStatus) && savedStatus !== form.partStatus) {
         await partApi.changeStatus(
           savedId,
           form.partStatus as "ACTIVE" | "INACTIVE"
         );
       }
 
-      const savedAttachments = await Promise.all(form.attachments.map(async (attachment) => {
+      const savedAttachments = skipPartAttachments ? [] : await Promise.all(form.attachments.map(async (attachment) => {
         if (attachment.attachmentId && attachment.file) {
           const uploaded = await attachmentApi.upload("PART", savedId, attachment.file, attachment);
           await attachmentApi.remove("PART", savedId, attachment.attachmentId);
@@ -929,11 +1350,27 @@ export default function PartFormPage() {
         }
         return null;
       }));
-      const nextAttachments = storedAttachments(savedAttachments.filter((attachment): attachment is StoredAttachment => Boolean(attachment)));
-      const nextForm = { ...form, attachments: nextAttachments };
-      setForm((current) => ({ ...current, attachments: nextAttachments }));
+      const nextAttachments = skipPartAttachments
+        ? form.attachments
+        : storedAttachments(savedAttachments.filter((attachment): attachment is StoredAttachment => Boolean(attachment)));
+      const persistedProcessPlans = skipWorkInstructionAttachments
+        ? savedProcessPlans
+        : await saveProcessInstructionAttachments(savedProcessPlans);
+      setProcessPlans(persistedProcessPlans);
+      const nextForm = {
+        ...form,
+        attachments: nextAttachments,
+        partStatus: savedStatus,
+        bomReleaseStatus: response?.data?.bom_release_status ?? response?.data?.bomReleaseStatus ?? form.bomReleaseStatus,
+      };
+      setForm((current) => ({ ...current, ...nextForm }));
 
-      unsaved.markSavedValue({ form: nextForm, bomComponents, processPlans: savedProcessPlans }); setMessage(response?.message ?? "Part saved successfully.");
+      unsaved.markSavedValue({ form: nextForm, bomComponents, processPlans: persistedProcessPlans });
+      // React state has not re-rendered yet when a newly created Part redirects
+      // to its edit URL. Reset the current guard snapshot too, so that redirect
+      // is recognised as a completed save instead of an attempt to discard work.
+      unsaved.markSaved();
+      setMessage(response?.message ?? "Part saved successfully.");
 
       if (action === "SUBMIT") {
         window.setTimeout(() => {
@@ -973,6 +1410,16 @@ export default function PartFormPage() {
         </div>
 
         <div className="master-form-actions">
+          {isEditMode && form.partStatus === "ACTIVE" && (
+            <button
+              type="button"
+              className="secondary-action-button"
+              onClick={openRevisionClone}
+            >
+              <GitBranch size={16} />
+              New Drawing Revision
+            </button>
+          )}
           {!!bomComponents.length && (
             <button
               type="button"
@@ -1035,6 +1482,16 @@ export default function PartFormPage() {
         <Alert type="success" message={message} />
       )}
 
+      {form.partStatus === "DRAWING_UNDER_REVISION" && (
+        <div className="part-revision-warning" role="alert">
+          <GitBranch size={18} />
+          <div>
+            <strong>Drawing under revision - contact QA department.</strong>
+            <span>This Part cannot be used in transactions until its BOM and default Process Plan are released.</span>
+          </div>
+        </div>
+      )}
+
       <form
         id="part-master-form"
         className={`master-entry-form${isViewMode ? " part-master-view-mode" : ""}`}
@@ -1053,37 +1510,53 @@ export default function PartFormPage() {
           </div>
 
           <div className="master-form-grid">
-            <label className="master-field span-2">
+            <label className="master-field span-2 part-customer-picker">
               <span>
                 Customer
                 <b>*</b>
               </span>
 
-              <select
-                name="customerId"
-                value={form.customerId}
-                onChange={handleCustomerChange}
-                disabled={isViewMode}
-              >
-                <option
-                  value=""
-                  data-code=""
-                  data-name=""
-                >
-                  Select customer
-                </option>
+              <input
+                value={customerSearch}
+                onChange={(event) => handleCustomerSearch(event.target.value)}
+                onFocus={() => {
+                  setCustomerSearchOpen(customerSearch.trim().length >= 2);
+                  setActiveCustomerIndex(-1);
+                }}
+                onBlur={() => window.setTimeout(() => setCustomerSearchOpen(false), 120)}
+                onKeyDown={handleCustomerKeyDown}
+                readOnly={isViewMode}
+                placeholder="Type at least 2 letters to search customers"
+                autoComplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={customerSearchOpen}
+                aria-controls="part-customer-options"
+                aria-activedescendant={activeCustomerIndex >= 0 ? `part-customer-option-${customerOptions[activeCustomerIndex]?.customerId}` : undefined}
+              />
 
-                {customers.map((customer) => (
-                  <option
-                    key={customer.customerId}
-                    value={customer.customerId}
-                    data-code={customer.customerCode}
-                    data-name={customer.customerName}
-                  >
-                    {customer.customerCode} - {customer.customerName}
-                  </option>
-                ))}
-              </select>
+              {customerSearchOpen && customerSearch.trim().length >= 2 && (
+                <div id="part-customer-options" className="part-customer-options" role="listbox">
+                  {customerSearchLoading ? <p>Searching customers…</p>
+                    : customerOptions.length ? customerOptions.map((customer, index) => (
+                      <button
+                        key={customer.customerId}
+                        id={`part-customer-option-${customer.customerId}`}
+                        ref={(element) => { customerOptionRefs.current[index] = element; }}
+                        type="button"
+                        role="option"
+                        className={index === activeCustomerIndex ? "is-active" : undefined}
+                        aria-selected={index === activeCustomerIndex}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseMove={() => setActiveCustomerIndex(index)}
+                        onClick={() => selectCustomer(customer)}
+                      >
+                        <strong>{customer.customerCode}</strong>
+                        <span>{customer.customerName}</span>
+                      </button>
+                    )) : <p>No active customers found.</p>}
+                </div>
+              )}
             </label>
 
             <label className="master-field">
@@ -1103,8 +1576,11 @@ export default function PartFormPage() {
                 name="partStatus"
                 value={form.partStatus}
                 onChange={handleChange}
-                disabled={isViewMode}
+                disabled={isViewMode || form.partStatus === "DRAWING_UNDER_REVISION"}
               >
+                {form.partStatus === "DRAWING_UNDER_REVISION" && (
+                  <option value="DRAWING_UNDER_REVISION">Drawing Under Revision</option>
+                )}
                 {referenceData.options("RECORD_STATUS").map((option) =>
                   <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
@@ -1188,7 +1664,7 @@ export default function PartFormPage() {
             </div>
           </div>
 
-          <div className="master-form-grid">
+          <div className="master-form-grid part-drawing-details-grid">
             <label className="master-field">
               <span>Drawing Number</span>
 
@@ -1259,112 +1735,74 @@ export default function PartFormPage() {
           </div>
         </section>
 
-        <section className="master-form-section">
-          <div className="master-section-header">
-            <div>
-              <h2>{form.partCategory === "ASSEMBLY" ? "Measurement Details" : "Material Details"}</h2>
-
-              <p>
-                {form.partCategory === "ASSEMBLY"
-                  ? "Optional part weight and unit of measurement for the assembly."
-                  : "Material specification, grade, weight and measurement details."}
-              </p>
-            </div>
-          </div>
-
-          <div className="master-form-grid">
-            {form.partCategory !== "ASSEMBLY" && (
-              <label className="master-field span-2">
-                <span>
-                  Material Specification
-                  <b>*</b>
-                </span>
-
-                <input
-                  name="materialSpecification"
-                  value={form.materialSpecification}
-                  onChange={handleChange}
-                  readOnly={isViewMode}
-                  placeholder="Enter material specification"
-                />
-              </label>
-            )}
-
-            {form.partCategory !== "ASSEMBLY" && <>
-              <label className="master-field">
-                <span>Material</span>
-
-                <select
-                  name="materialId"
-                  value={form.materialId}
-                  disabled={isViewMode}
-                  onChange={(event) => setForm((current) => ({
-                    ...current, materialId: event.target.value, gradeId: "",
-                  }))}
+        <section className="master-form-section part-attachments-section">
+            <aside className="part-drawing-attachments-panel" aria-label="Part attachments">
+              <header>
+                <div>
+                  <h3>Attachments</h3>
+                  <p>Drawings and supporting files</p>
+                </div>
+                {!isViewMode && <button
+                  type="button"
+                  className="marketing-add-line-button"
+                  onClick={addAttachment}
                 >
-                  <option value="">
-                    Select material
-                  </option>
+                  <Plus size={15} /> Add
+                </button>}
+              </header>
 
-                  {referenceData.materials.map((material) =>
-                    <option key={material.materialId} value={material.materialId}>{material.materialName}</option>)}
-                </select>
-              </label>
-
-              <label className="master-field">
-                <span>Grade</span>
-
-                <select
-                  name="gradeId"
-                  value={form.gradeId}
-                  onChange={handleChange}
-                  disabled={isViewMode}
-                >
-                  <option value="">
-                    Select grade
-                  </option>
-
-                  {availableGrades.map((grade) =>
-                    <option key={grade.materialGradeId} value={grade.materialGradeId}>
-                      {grade.gradeCode || grade.gradeName}
-                    </option>)}
-                </select>
-              </label>
-            </>}
-
-            <label className="master-field">
-              <span>Part Weight</span>
-
-              <input
-                type="number"
-                name="partWeight"
-                value={form.partWeight}
-                onChange={handleChange}
-                readOnly={isViewMode}
-                min="0"
-                step="0.001"
-              />
-            </label>
-
-            <label className="master-field">
-              <span>Unit of Measurement</span>
-
-              <select
-                name="uomId"
-                value={form.uomId}
-                disabled={isViewMode}
-                onChange={(event) => {
-                  const uom = referenceData.uoms.find((row) => String(row.uomId) === event.target.value);
-                  setForm((current) => ({ ...current, uomId: event.target.value,
-                    unitOfMeasurement: uom?.uomCode || "" }));
-                }}
-              >
-                <option value="">Select UOM</option>
-                {referenceData.uoms.map((uom) =>
-                  <option key={uom.uomId} value={uom.uomId}>{uom.uomCode} - {uom.uomName}</option>)}
-              </select>
-            </label>
-          </div>
+              <div className="part-attachment-list">
+                {form.attachments.map((attachment, index) => (
+                  <div className="part-attachment-row" key={`${index}-${attachment.attachmentId ?? "new"}`}>
+                    <span className="part-attachment-index">{index + 1}</span>
+                    <div className="part-attachment-fields">
+                      <select
+                        value={attachment.attachmentType}
+                        disabled={isViewMode}
+                        onChange={(event) => updateAttachmentType(index, event.target.value as PartAttachmentType)}
+                      >
+                        {partAttachmentTypeOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <input
+                        value={attachment.attachmentName}
+                        readOnly={isViewMode}
+                        onChange={(event) => updateAttachment(index, "attachmentName", event.target.value)}
+                        placeholder="Document name (optional)"
+                      />
+                      {!isViewMode && (
+                        <label className="part-attachment-file-picker">
+                          <input
+                            type="file"
+                            accept={attachment.attachmentType === "PART_MODEL" ? ".step,.stp" : ".pdf,.png,.jpg,.jpeg,.dwg,.dxf,.step,.stp,.doc,.docx,.xls,.xlsx"}
+                            onChange={(event) => selectAttachmentFile(index, event.target.files?.[0] ?? null)}
+                          />
+                          <span>{attachment.file?.name || (attachment.fileName ? "Replace file" : "Choose file")}</span>
+                        </label>
+                      )}
+                    </div>
+                    {attachment.fileUrl && (
+                      <a className="part-attachment-file-link" href={attachment.fileUrl} target="_blank" rel="noreferrer" title={attachment.fileName || "Open attached file"}>
+                        <ExternalLink size={14} />
+                        <span>{attachment.fileName || "Open file"}</span>
+                      </a>
+                    )}
+                    {!isViewMode && (
+                      <button
+                        type="button"
+                        className="marketing-delete-line-button part-attachment-delete"
+                        disabled={form.attachments.length === 1}
+                        onClick={() => void removeAttachment(index)}
+                        aria-label={`Delete attachment ${index + 1}`}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </aside>
         </section>
 
         <section className="master-form-section">
@@ -1446,7 +1884,47 @@ export default function PartFormPage() {
 
           {form.createProcessFlow && <PartProcessPlanVariantsEditor value={processPlans}
             onChange={setProcessPlans} masters={processMasters} saving={saving !== null}
-            onSaveInspection={() => savePart("DRAFT")} readOnly={isViewMode}/>} 
+            canApproveDocuments={isEditMode}
+            printContext={{
+              drawingNumber: form.drawingNumber,
+              drawingRevisionNumber: form.drawingRevisionNumber,
+              partKind: form.partCategory,
+              partName: form.partName,
+              partNumber: form.partNumber,
+              drawingCode: form.drawingCode,
+              customerName: form.customerName,
+              materialSpecification: form.materialSpecification,
+            }}
+            onSaveInspection={(nextProcessPlans, saveOptions) => savePart("DRAFT", nextProcessPlans, saveOptions)} readOnly={isViewMode}/>} 
+
+          {isEditMode && form.partStatus === "DRAWING_UNDER_REVISION" && form.createProcessFlow && (
+            <section className="part-revision-release-panel">
+              <div>
+                <span className={`part-revision-release-status ${defaultProcessPlanReleased ? "released" : "draft"}`}>
+                  <ShieldCheck size={16} />
+                  Process Plan {defaultProcessPlanReleased ? "Released" : "Draft"}
+                </span>
+                <p>
+                  {defaultProcessPlanReleased
+                    ? "The active default Process Plan is approved. Click Update to retain this release."
+                    : "Complete the Program, Tool List, Work Instructions and Inspection Plan, then approve and release the active default Process Plan."}
+                </p>
+              </div>
+              {!isViewMode && !defaultProcessPlanReleased && (
+                <button
+                  type="button"
+                  className="primary-action-button"
+                  title={defaultProcessPlanReadyForRelease
+                    ? "Approve & Release Process Plan"
+                    : "Show the incomplete approval items"}
+                  onClick={() => void releaseDefaultProcessPlan()}
+                >
+                  <ShieldCheck size={16} />
+                  Approve & Release Process Plan
+                </button>
+              )}
+            </section>
+          )}
 
           {form.createBillOfMaterial && (
             <div className="part-bom-attachment-panel">
@@ -1458,17 +1936,28 @@ export default function PartFormPage() {
                     <input
                       id="part-bom-search"
                       value={bomSearch}
-                      onFocus={() => setBomSearchOpen(true)}
                       onChange={(event) => {
-                        setBomSearch(event.target.value);
+                        const search = event.target.value;
+                        setBomSearch(search);
                         setSelectedBomOption(null);
-                        setBomSearchOpen(true);
+                        setBomOptions([]);
+                        setBomSearchOpen(search.trim().length >= 2);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setBomSearchOpen(false);
+                        }
                       }}
                       placeholder="Search by part number, item number or description..."
                       autoComplete="off"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={bomSearchOpen && bomSearch.trim().length >= 2}
+                      aria-controls="part-bom-search-results"
                     />
-                    {bomSearchOpen && (
-                      <div className="part-bom-search-results">
+                    {bomSearchOpen && bomSearch.trim().length >= 2 && (
+                      <div id="part-bom-search-results" className="part-bom-search-results" role="listbox">
                         {bomSearchLoading && <div className="part-bom-search-message">Searching...</div>}
                         {!bomSearchLoading && !bomOptions.length && (
                           <div className="part-bom-search-message">No matching Part or Item found.</div>
@@ -1521,108 +2010,84 @@ export default function PartFormPage() {
               </div>
             </div>
           )}
-        </section>
 
-        <section className="master-form-section">
-          <div className="master-section-header between">
-            <div className="master-heading-inline">
+          {isEditMode && form.partStatus === "DRAWING_UNDER_REVISION" && (
+            <section className="part-revision-release-panel">
               <div>
-                <h2>Attachments</h2>
-
+                <span className={`part-revision-release-status ${form.bomReleaseStatus.toLowerCase()}`}>
+                  <ShieldCheck size={16} />
+                  BOM {form.bomReleaseStatus === "RELEASED" ? "Released" : form.bomReleaseStatus === "NOT_REQUIRED" ? "Not required" : "Draft"}
+                </span>
                 <p>
-                  Customer drawings, standards and
-                  supporting documents.
+                  {bomComponents.length
+                    ? "Review the copied BOM, then approve and release it independently."
+                    : "No BOM is attached, so BOM release is not required for this revision."}
                 </p>
               </div>
-            </div>
-
-            {!isViewMode && <button
-              type="button"
-              className="marketing-add-line-button"
-              onClick={addAttachment}
-            >
-              <Plus size={16} />
-              Add Attachment
-            </button>}
-          </div>
-
-          <div className="master-attachment-list">
-            {form.attachments.map(
-              (attachment, index) => (
-                <div
-                  className="master-attachment-row"
-                  key={`${index}-${attachment.attachmentId ?? "new"}`}
-                >
-                  <span className="attachment-index">
-                    {index + 1}
-                  </span>
-
-                  <select
-                    value={attachment.attachmentType}
-                    disabled={isViewMode}
-                    onChange={(event) =>
-                      updateAttachment(
-                        index,
-                        "attachmentType",
-                        event.target.value
-                      )
-                    }
-                  >
-                    {referenceData.options("PART_ATTACHMENT_TYPE").map((option) =>
-                      <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-
-                  <input
-                    value={attachment.attachmentName}
-                    readOnly={isViewMode}
-                    onChange={(event) =>
-                      updateAttachment(
-                        index,
-                        "attachmentName",
-                        event.target.value
-                      )
-                    }
-                    placeholder="Document description"
-                  />
-
-                  <input
-                    type="file"
-                    disabled={isViewMode}
-                    accept=".pdf,.png,.jpg,.jpeg,.dwg,.dxf,.doc,.docx,.xls,.xlsx"
-                    onChange={(event) =>
-                      updateAttachment(
-                        index,
-                        "file",
-                        event.target.files?.[0] ??
-                          null
-                      )
-                    }
-                  />
-
-                  {attachment.fileUrl && (
-                    <a className="master-attachment-link" href={attachment.fileUrl} target="_blank" rel="noreferrer">
-                      <ExternalLink size={14} /> {attachment.fileName || "Open file"}
-                    </a>
-                  )}
-
-                  <button
-                    type="button"
-                    className="marketing-delete-line-button"
-                    disabled={
-                      isViewMode || form.attachments.length === 1
-                    }
-                    onClick={() =>
-                      removeAttachment(index)
-                    }
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              )
-            )}
-          </div>
+              {!isViewMode && form.bomReleaseStatus === "DRAFT" && (
+                <button type="button" className="primary-action-button" disabled={bomReleasing}
+                  onClick={() => void releaseRevisionBom()}>
+                  <ShieldCheck size={16} />
+                  {bomReleasing ? "Releasing..." : "Approve & Release BOM"}
+                </button>
+              )}
+            </section>
+          )}
         </section>
+
       </form>
+
+      {revisionClone && (
+        <div className="part-revision-clone-overlay" role="presentation" onMouseDown={(event) => {
+          if (event.currentTarget === event.target && !revisionCloning) setRevisionClone(null);
+        }}>
+          <form className="part-revision-clone-dialog" role="dialog" aria-modal="true"
+            aria-labelledby="part-revision-clone-title" onSubmit={createRevisionClone}>
+            <header>
+              <div>
+                <GitBranch size={21} />
+                <span>
+                  <h2 id="part-revision-clone-title">Create Drawing Revision</h2>
+                  <p>{form.partNumber} will be made inactive after the revision is created.</p>
+                </span>
+              </div>
+              <button type="button" disabled={revisionCloning} onClick={() => setRevisionClone(null)} aria-label="Close drawing revision form">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="part-revision-clone-content">
+              <p className="part-revision-clone-notice">
+                BOM, Process Plan, linked Inspection Plan and drawings will be copied. The new Part stays under revision until QA releases the BOM and default Process Plan.
+              </p>
+              <div className="master-form-grid">
+                <label className="master-field">
+                  <span>New Part Number <b>*</b></span>
+                  <input autoFocus value={revisionClone.partNumber} onChange={(event) => setRevisionClone((current) => current ? { ...current, partNumber: event.target.value } : current)} />
+                </label>
+                <label className="master-field">
+                  <span>Drawing Number</span>
+                  <input value={revisionClone.drawingNumber} onChange={(event) => setRevisionClone((current) => current ? { ...current, drawingNumber: event.target.value } : current)} />
+                </label>
+                <label className="master-field">
+                  <span>New Drawing Revision <b>*</b></span>
+                  <input value={revisionClone.drawingRevisionNumber} onChange={(event) => setRevisionClone((current) => current ? { ...current, drawingRevisionNumber: event.target.value } : current)} />
+                </label>
+                <label className="master-field">
+                  <span>Revision Date</span>
+                  <input type="date" max={new Date().toISOString().slice(0, 10)} value={revisionClone.drawingRevisionDate} onChange={(event) => setRevisionClone((current) => current ? { ...current, drawingRevisionDate: event.target.value } : current)} />
+                </label>
+              </div>
+            </div>
+            <footer>
+              <button type="button" className="secondary-action-button" disabled={revisionCloning} onClick={() => setRevisionClone(null)}>Cancel</button>
+              <button type="submit" className="primary-action-button" disabled={revisionCloning}>
+                <GitBranch size={16} />
+                {revisionCloning ? "Creating..." : "Create Revision"}
+              </button>
+            </footer>
+          </form>
+        </div>
+      )}
 
       {bomHierarchyOpen && (
         <div className="part-bom-hierarchy-overlay" onMouseDown={(event) => {

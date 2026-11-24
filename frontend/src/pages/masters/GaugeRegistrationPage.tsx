@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiMessage } from "../../api/client";
 import { gaugeApi } from "../../api/gauge.api";
+import { supplierApi } from "../../api/supplier.api";
 import Alert from "../../components/Alert";
 import { useAppFeedback } from "../../components/AppFeedback";
 import "./CustomerFormPage.css";
@@ -35,6 +36,7 @@ const blank = {
   sourceGrnItemId: "", quantity: "1", instrumentAbbreviation: "", makeName: "", modelNumber: "",
   measurementRange: "", leastCount: "", accuracy: "", calibrationFrequencyMonths: "12",
   lastCalibrationDate: "", calibrationDueDate: "", calibrationAgency: "", currentLocation: "", remarks: "",
+  manufacturerSerialNumberRange: "",
 };
 
 export default function GaugeRegistrationPage() {
@@ -42,15 +44,15 @@ export default function GaugeRegistrationPage() {
   const { showSuccess } = useAppFeedback();
   const [sources, setSources] = useState<RegistrationSource[]>([]);
   const [locations, setLocations] = useState<StorageLocation[]>([]);
+  const [calibrationSuppliers, setCalibrationSuppliers] = useState<Array<{ supplierId: number; supplierCode?: string; supplierName: string; supplierCategory?: string | null }>>([]);
   const [form, setForm] = useState(blank);
-  const [serialNumbers, setSerialNumbers] = useState<string[]>([""]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const unsaved = useUnsavedChanges({ form, serialNumbers });
+  const unsaved = useUnsavedChanges(form);
 
   useEffect(() => {
-    void gaugeApi.lookups().then((response) => { setSources(response?.data?.registrationSources ?? []); setLocations(response?.data?.storageLocations ?? []); })
+    void Promise.all([gaugeApi.lookups(), supplierApi.list({ activeFlag: "Y", pageSize: 100 })]).then(([response, supplierResponse]) => { setSources(response?.data?.registrationSources ?? []); setLocations(response?.data?.storageLocations ?? []); setCalibrationSuppliers(Array.isArray(supplierResponse?.data) ? supplierResponse.data.filter((supplier: { supplierCategory?: string | null }) => String(supplier.supplierCategory || "").toUpperCase() === "CALIBRATION") : []); })
       .catch((reason) => setError(apiMessage(reason))).finally(() => setLoading(false));
   }, []);
 
@@ -67,7 +69,6 @@ export default function GaugeRegistrationPage() {
     const maximum = Number(source?.registrationAvailable || 1000);
     const next = Math.max(1, Math.min(Number.parseInt(value || "1", 10) || 1, maximum));
     set("quantity", String(next));
-    setSerialNumbers((current) => Array.from({ length: next }, (_, index) => current[index] ?? ""));
   };
   const selectSource = (value: string) => {
     const selected = sources.find((entry) => entry.grnItemId === Number(value));
@@ -85,11 +86,13 @@ export default function GaugeRegistrationPage() {
       calibrationAgency: selected?.calibrationAgency || "",
       currentLocation: [selected?.warehouseCode, selected?.binLocation].filter(Boolean).join(" / "),
     });
-    setSerialNumbers(Array.from({ length: Number(selected?.registrationAvailable || 1) }, () => ""));
     setError("");
   };
-  const updateSerial = (index: number, value: string) => setSerialNumbers((current) => current.map((entry, row) => row === index ? value : entry));
 
+  const selectStorageLocation = (value: string) => {
+    const selected = locations.find((entry) => String(entry.locationId) === value);
+    setForm((current) => ({ ...current, storageLocationId: value, currentLocation: selected?.label || "" }));
+  };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     const savedSnapshot = unsaved.snapshot();
@@ -99,7 +102,7 @@ export default function GaugeRegistrationPage() {
       setSaving(true); setError("");
       const response = await gaugeApi.register({
         ...form, sourceGrnItemId: Number(form.sourceGrnItemId), quantity: Number(form.quantity),
-        calibrationFrequencyMonths: Number(form.calibrationFrequencyMonths), serialNumbers,
+        calibrationFrequencyMonths: Number(form.calibrationFrequencyMonths),
       });
       unsaved.markSaved(savedSnapshot);
       showSuccess(`${response?.data?.records?.length || form.quantity} Gauge Master record(s) created from ${source.grnNumber}.`);
@@ -117,7 +120,7 @@ export default function GaugeRegistrationPage() {
     <form id="gauge-registration-form" className="master-entry-form" onSubmit={save}>
       <section className="master-form-section"><div className="master-section-header"><div><h2>Posted GRN Source</h2><p>Select a posted Instruments &amp; Gauges receipt. One Gauge Master record is created for each physical instrument.</p></div></div>
         <div className="master-form-grid"><label className="master-field span-2"><span>Posted GRN Item <b>*</b></span><select value={form.sourceGrnItemId} onChange={(event) => selectSource(event.target.value)}><option value="">Select posted GRN item</option>{sources.map((entry) => <option key={entry.grnItemId} value={entry.grnItemId}>{entry.grnNumber} · {entry.itemCode} · {entry.itemDescription} ({entry.registrationAvailable} physical gauges in inventory)</option>)}</select></label>
-          {source && <div className="gauge-source-summary span-2"><strong>{source.itemDescription}</strong><span>{source.itemCode} · Inventory stock: {source.inventoryQuantity} · Already registered: {source.registeredQuantity} · Available for registration: {source.registrationAvailable}</span></div>}
+          {source && <><label className="master-field"><span>Item Name</span><input value={source.itemDescription} readOnly /></label><div className="gauge-source-summary"><strong>{source.itemCode}</strong><span>Inventory stock: {source.inventoryQuantity} · Already registered: {source.registeredQuantity} · Available for registration: {source.registrationAvailable}</span></div></>}
         </div>
       </section>
       <section className="master-form-section"><div className="master-section-header"><div><h2>Individual Gauge Registration</h2><p>Gauge IDs are generated as <strong>ATA–abbreviation–running serial number</strong>.</p></div></div>
@@ -131,12 +134,12 @@ export default function GaugeRegistrationPage() {
           <label className="master-field"><span>Calibration Frequency (Months) <b>*</b></span><input type="number" min="1" max="120" value={form.calibrationFrequencyMonths} disabled={!source} onChange={(event) => set("calibrationFrequencyMonths", event.target.value)}/></label>
           <label className="master-field"><span>Last Calibration Date</span><DateInput type="date" value={form.lastCalibrationDate} disabled={!source} onChange={(event) => set("lastCalibrationDate", event.target.value)}/></label>
           <label className="master-field"><span>Calibration Due Date</span><DateInput type="date" value={form.calibrationDueDate} disabled={!source} readOnly/><small>Calculated from Last Calibration Date and Frequency.</small></label>
-          <label className="master-field"><span>Calibration Agency</span><input value={form.calibrationAgency} disabled={!source} onChange={(event) => set("calibrationAgency", event.target.value)}/></label>
-          <GaugeStorageLocation locations={locations} value={form.storageLocationId} disabled={!source} onChange={(value) => set("storageLocationId", value)}/>
-          <label className="master-field"><span>Initial Location <b>*</b></span><input value={form.currentLocation} disabled={!source} onChange={(event) => set("currentLocation", event.target.value)} placeholder="Main Stores / Gauge Room"/></label>
+          <label className="master-field"><span>Calibration Agency</span><select value={form.calibrationAgency} disabled={!source} onChange={(event) => set("calibrationAgency", event.target.value)}><option value="">Select calibration supplier</option>{form.calibrationAgency && !calibrationSuppliers.some((supplier) => supplier.supplierName === form.calibrationAgency) && <option value={form.calibrationAgency}>{form.calibrationAgency} (from item master)</option>}{calibrationSuppliers.map((supplier) => <option key={supplier.supplierId} value={supplier.supplierName}>{supplier.supplierCode ? `${supplier.supplierCode} · ` : ""}{supplier.supplierName}</option>)}</select></label>
+          <GaugeStorageLocation locations={locations} value={form.storageLocationId} disabled={!source} onChange={selectStorageLocation}/>
+          <label className="master-field"><span>Initial Location <b>*</b></span><input value={form.currentLocation} disabled={!source} readOnly placeholder="Select Storage Warehouse / Rack"/><small>Set automatically from the selected Location Master entry.</small></label>
+          <label className="master-field span-2"><span>Manufacturer Serial Number Range</span><input value={form.manufacturerSerialNumberRange} maxLength={120} disabled={!source} onChange={(event) => set("manufacturerSerialNumberRange", event.target.value)} placeholder="e.g. MFG-000001 to MFG-010000"/><small>Enter one free-text range for this GRN item. This avoids entering one serial number for every gauge.</small></label>
           <label className="master-field span-2"><span>Remarks</span><textarea rows={3} value={form.remarks} disabled={!source} onChange={(event) => set("remarks", event.target.value)}/></label>
         </div>
-        {source && <div className="gauge-serial-section"><h3>Manufacturer Serial Numbers</h3><p>Optional. The generated Gauge ID remains the ERP serial number for every physical gauge.</p><div className="gauge-serial-grid">{serialNumbers.map((serial, index) => <label key={index}><span>{index + 1}. ATA-{form.instrumentAbbreviation || "…"}-<em>auto</em></span><input value={serial} maxLength={120} onChange={(event) => updateSerial(index, event.target.value)} placeholder="Manufacturer serial number (optional)"/></label>)}</div></div>}
       </section>
     </form>
   </div>;

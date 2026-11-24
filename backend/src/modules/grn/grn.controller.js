@@ -2,6 +2,7 @@ import { sendSuccess } from "../../utils/response.js";
 import * as service from "./grn.service.js";
 export async function list(req,res){const result=await service.list(req.query,req.user);return sendSuccess(res,{data:result.rows,meta:{total:result.total,page:result.page,pageSize:result.pageSize}});}
 export async function summary(req,res){return sendSuccess(res,{data:await service.summary(req.user)});}
+export async function pendingPoReceipts(req,res){const result=await service.pendingPoReceipts(req.query,req.user);return sendSuccess(res,{data:result.rows,meta:{total:result.total,page:result.page,pageSize:result.pageSize}});}
 export async function listSupplierOptions(req,res){return sendSuccess(res,{data:await service.listSupplierOptions(req.user)});}
 export async function get(req,res){return sendSuccess(res,{data:await service.get(req.params.id,req.user)});}
 export async function create(req,res){return sendSuccess(res,{statusCode:201,message:"GRN entry saved.",data:await service.create(req.body,req.user)});}

@@ -58,6 +58,15 @@ export async function update(attachmentId, data, connection = db) {
   );
 }
 
+export async function updateFileMetadata(attachmentId, data, connection = db) {
+  await connection.execute(
+    `UPDATE application_attachments
+        SET mime_type=?, file_size_bytes=?
+      WHERE attachment_id=?`,
+    [data.mimeType, Number(data.fileSizeBytes || 0), Number(attachmentId)]
+  );
+}
+
 export async function remove(attachmentId, connection = db) {
   await connection.execute(
     "UPDATE application_attachments SET active_flag='N' WHERE attachment_id=?",

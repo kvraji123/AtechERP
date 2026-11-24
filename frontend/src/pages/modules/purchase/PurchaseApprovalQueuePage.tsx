@@ -6,6 +6,7 @@ import { useAppFeedback } from "../../../components/AppFeedback";
 import { apiMessage } from "../../../api/client";
 import { purchaseApi } from "../../../api/purchase.api";
 import { supplierApi } from "../../../api/supplier.api";
+import { useReferenceData } from "../../../hooks/useReferenceData";
 import Pagination, { PAGE_SIZE } from "../../../components/Pagination";
 import PurchaseApprovalFilters, { type ApprovalFilters } from "./components/PurchaseApprovalFilters";
 import PurchaseApprovalTable from "./components/PurchaseApprovalTable";
@@ -21,6 +22,7 @@ export default function PurchaseApprovalQueuePage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { showSuccess } = useAppFeedback();
+  const referenceData = useReferenceData([]);
   const [requests, setRequests] = useState<ReturnType<typeof loadPurchaseApprovalQueue>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -91,7 +93,7 @@ export default function PurchaseApprovalQueuePage() {
 
       <section id="pr-approval-list" className="purchase-form-section">
         <header className="purchase-approval-list-head"><div><h2>Submitted Purchase Requests</h2><p>High-priority and earliest required-date requests are shown first</p></div><span>{total} request{total === 1 ? "" : "s"}</span></header>
-        <PurchaseApprovalFilters value={filters} requests={requests} suppliers={suppliers} onChange={setFilters} onRefresh={() => { void load(); void loadCounts(); showSuccess("Purchase request queue refreshed."); }}  pagination={<Pagination page={page} total={total} onPageChange={setPage} itemLabel="purchase requests" disabled={loading} />} />
+        <PurchaseApprovalFilters value={filters} requests={requests} suppliers={suppliers} departments={referenceData.departments} onChange={setFilters} onRefresh={() => { void load(); void loadCounts(); showSuccess("Purchase request queue refreshed."); }}  pagination={<Pagination page={page} total={total} onPageChange={setPage} itemLabel="purchase requests" disabled={loading} />} />
         {error && <div className="marketing-form-alert error" role="alert">{error}</div>}
         {loading ? <div className="purchase-po-approval-empty">Loading approval queue...</div> : <PurchaseApprovalTable requests={filteredRequests} onReview={(request) => navigate(`/purchase/approvals/${request.id}`)} />}
         

@@ -1,19 +1,39 @@
-import { withTransaction } from "../../config/db.js";
+import { db, withTransaction } from "../../config/db.js";
 import { AppError } from "../../utils/AppError.js";
+import { env } from "../../config/env.js";
 import { getNextDocumentNumber } from "../../utils/sequence.js";
-import { todayInAppTimeZone } from "../../utils/dateTime.js";
+import { isValidDateOnly, todayInAppTimeZone } from "../../utils/dateTime.js";
+import { recordAudit } from "../../shared/services/audit.service.js";
+import { removeStoredFiles } from "../attachment/attachment.service.js";
 import * as customerRepository from "../customer/customer.repository.js";
 import * as partRepository from "../part/part.repository.js";
+import {
+  findMarketingDatabaseByEnquiryId,
+  marketingDatabaseForOrderType,
+} from "../marketing/marketing-database.js";
 import * as repository from "./enquiry.repository.js";
 
 export async function dashboardSummary() {
-  return repository.dashboardSummary();
+  const [sales, labour] = await Promise.all([
+    repository.dashboardSummary(db),
+    repository.dashboardSummary(marketingDatabaseForOrderType("LABOUR").pool),
+  ]);
+  return Object.fromEntries(
+    Array.from(new Set([...Object.keys(sales), ...Object.keys(labour)]))
+      .map((key) => [key, Number(sales[key] || 0) + Number(labour[key] || 0)])
+  );
 }
 
 const clean = (value) =>
   value === null || value === undefined
     ? null
     : String(value).trim() || null;
+
+const tenantId = (user) => String(user?.tenantId || env.defaultTenantId || "DEFAULT");
+
+function canEditSubmittedEnquiry(user) {
+  return Array.isArray(user?.permissions) && user.permissions.includes("EDIT_ENQUIRY_ALL_STAGES");
+}
 
 const COLUMN_FILTER_KEYS = new Set([
   "docNo",
@@ -54,14 +74,34 @@ function columnFilters(value) {
 
 function currentDate() { return todayInAppTimeZone(); }
 
+function ensureNotFutureDate(value, label) {
+  const date = clean(value);
+  if (!date) return;
+  if (!isValidDateOnly(date)) throw new AppError(`${label} must be a valid date.`);
+  if (date > currentDate()) throw new AppError(`${label} cannot be a future date.`);
+}
+
+function ensureNotPastDate(value, label) {
+  const date = clean(value);
+  if (!date) return;
+  if (!isValidDateOnly(date)) throw new AppError(`${label} must be a valid date.`);
+  if (date < currentDate()) throw new AppError(`${label} cannot be earlier than today.`);
+}
+
 function revisionLabel(sequence) {
   return `REV${String(sequence).padStart(2, "0")}`;
 }
 
 function validate(data, action = "DRAFT") {
-  if (!Number(data.customerId)) {
+  if (action === "SUBMITTED" && !Number(data.customerId)) {
     throw new AppError("Customer is required.");
   }
+
+  ensureNotPastDate(data.requiredDate, "Required Date");
+  ensureNotFutureDate(data.customerEnquiryDate, "Customer Enquiry Date");
+  (Array.isArray(data.parts) ? data.parts : []).forEach((part, index) => {
+    ensureNotFutureDate(part?.drawingRevisionDate, `Drawing Revision Date for row ${index + 1}`);
+  });
 
   if (action === "SUBMITTED") {
     if (!["MAIL", "ORAL", "VISIT"].includes(data.enquiryMode)) {
@@ -98,10 +138,6 @@ function validate(data, action = "DRAFT") {
         throw new AppError(`Description is required for row ${number}.`);
       }
 
-      if (!clean(part.materialAndGrade)) {
-        throw new AppError(`Material and Grade is required for row ${number}.`);
-      }
-
     });
   }
 }
@@ -120,7 +156,11 @@ function partMasterSnapshot(master) {
   };
 }
 
-async function resolveParts(connection, data) {
+async function resolveParts(
+  masterConnection,
+  data,
+  { allowInactivePersistedParts = false } = {}
+) {
   const parts = Array.isArray(data.parts) ? data.parts : [];
   const resolved = [];
 
@@ -136,11 +176,35 @@ async function resolveParts(connection, data) {
     let master = null;
 
     if (Number(input.partId)) {
-      master = await partRepository.getPartById(Number(input.partId), connection);
-      if (
-        !master ||
-        master.active_flag !== "Y"
-      ) {
+      master = await partRepository.getPartById(Number(input.partId), masterConnection);
+      if (!master || master.active_flag !== "Y") {
+        const isPersistedPart = Number(input.enquiryPartId || input.enquiry_part_id) > 0;
+        if (master && allowInactivePersistedParts && isPersistedPart) {
+          const resolvedPart = {
+            ...input,
+            ...partMasterSnapshot(master),
+          };
+          ensureNotFutureDate(
+            resolvedPart.drawingRevisionDate,
+            `Drawing Revision Date for row ${row}`
+          );
+          resolved.push(resolvedPart);
+          continue;
+        }
+        const [revisionWarning] = master
+          ? await partRepository.findRevisionWarnings([Number(input.partId)], masterConnection)
+          : [];
+        if (revisionWarning) {
+          throw new AppError(
+            `Drawing revision is under progress for Part ${revisionWarning.partNumber}. Contact QA team.`,
+            409,
+            {
+              code: "PART_DRAWING_REVISION_IN_PROGRESS",
+              partId: Number(input.partId),
+              revisionPartId: Number(revisionWarning.revisionPartId),
+            }
+          );
+        }
         throw new AppError(`Selected Part Master is invalid for row ${row}.`, 409);
       }
       if (
@@ -152,14 +216,16 @@ async function resolveParts(connection, data) {
     } else if (clean(input.drawingNumber)) {
       master = await partRepository.getActivePartByDrawing(
         input.drawingNumber,
-        connection
+        masterConnection
       );
     }
 
-    resolved.push({
+    const resolvedPart = {
       ...input,
       ...(master ? partMasterSnapshot(master) : {}),
-    });
+    };
+    ensureNotFutureDate(resolvedPart.drawingRevisionDate, `Drawing Revision Date for row ${row}`);
+    resolved.push(resolvedPart);
   }
   return resolved;
 }
@@ -173,13 +239,16 @@ function enquiryValues(
   revisionDate
 ) {
   return [
-    Number(data.customerId),
-    customer.customer_code,
-    customer.customer_name,
-    customer.customer_short_name,
+    Number(data.customerId) || null,
+    customer?.customer_code || null,
+    customer?.customer_name || null,
+    customer?.customer_short_name || null,
+    clean(data.customerRepresentativeName)?.slice(0, 150) || null,
     data.enquiryMode || "MAIL",
     data.orderType || "SALES",
     clean(data.requiredDate),
+    clean(data.customerEnquiryReference),
+    clean(data.customerEnquiryDate),
     null,
     revisionNumber,
     revisionDate,
@@ -189,78 +258,131 @@ function enquiryValues(
   ];
 }
 
-export async function listEnquiries(query) {
+export async function listEnquiries(query, user) {
   const page = Math.max(Number(query.page || 1), 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize || 20), 1), 100);
+  const role = String(user?.role || "").trim().toUpperCase().replace(/\s+/g, "_");
+  const activeFlag = role === "ADMINISTRATOR" && clean(query.activeFlag) === "N" ? "N" : "Y";
 
-  return repository.listEnquiries({
+  const filters = {
     search: clean(query.search) || "",
     stage: clean(query.stage) || "",
     status: clean(query.status) || "",
+    activeFlag,
+    tenantId: tenantId(user),
     columnFilters: columnFilters(query.filters),
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-  });
+    limit: 1000,
+    offset: 0,
+  };
+  const [sales, labour] = await Promise.all([
+    repository.listEnquiries(filters, db),
+    repository.listEnquiries(filters, marketingDatabaseForOrderType("LABOUR").pool),
+  ]);
+  const rows = [
+    ...sales.rows.map((row) => ({ ...row, marketingDatabase: "ATECH" })),
+    ...labour.rows.map((row) => ({ ...row, marketingDatabase: "CMS" })),
+  ].sort((left, right) => String(right.created_on || "").localeCompare(String(left.created_on || ""))
+    || String(right.doc_no || "").localeCompare(String(left.doc_no || "")));
+  return {
+    rows: rows.slice((page - 1) * pageSize, page * pageSize),
+    total: sales.total + labour.total,
+  };
 }
 
 export async function listEnquiryFilterOptions() {
-  return repository.listEnquiryFilterOptions();
+  const [sales, labour] = await Promise.all([
+    repository.listEnquiryFilterOptions(db),
+    repository.listEnquiryFilterOptions(marketingDatabaseForOrderType("LABOUR").pool),
+  ]);
+  return [...sales, ...labour].filter((row, index, rows) =>
+    rows.findIndex((entry) => JSON.stringify(entry) === JSON.stringify(row)) === index
+  );
 }
 
-export async function getEnquiry(enquiryId) {
-  const enquiry = await repository.getEnquiry(enquiryId);
+export async function getEnquiry(enquiryId, user) {
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  const enquiry = await repository.getEnquiry(enquiryId, marketingDatabase.pool);
 
   if (!enquiry) {
     throw new AppError("Enquiry not found.", 404);
   }
 
+  const [parts, drawingAttachments] = await Promise.all([
+    repository.getEnquiryParts(enquiryId, marketingDatabase.pool),
+    repository.getDrawingAttachments(enquiryId, tenantId(user), marketingDatabase.pool),
+  ]);
+  const attachmentsByPart = new Map();
+  drawingAttachments.forEach((attachment) => {
+    const partId = Number(attachment.entityId);
+    attachmentsByPart.set(partId, [...(attachmentsByPart.get(partId) || []), attachment]);
+  });
+
   return {
     ...enquiry,
-    parts: await repository.getEnquiryParts(enquiryId),
+    marketingDatabase: marketingDatabase.key,
+    parts: parts.map((part) => ({
+      ...part,
+      drawingAttachments: attachmentsByPart.get(Number(part.enquiry_part_id)) || [],
+    })),
   };
 }
 
 export async function getEnquiryRevisions(enquiryId) {
-  await getEnquiry(enquiryId);
-  return repository.getEnquiryRevisions(enquiryId);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  return repository.getEnquiryRevisions(enquiryId, marketingDatabase.pool);
 }
 
-async function save(enquiryId, data, userCode, action) {
-  const saveStatus = action === "SUBMIT" ? "SUBMITTED" : "DRAFT";
-  validate(data, saveStatus);
+async function save(enquiryId, data, user, action) {
+  const userCode = typeof user === "string" ? user : user?.userCode;
+  const currentEnquiryId = Number(enquiryId || 0);
+  const marketingDatabase = currentEnquiryId
+    ? await findMarketingDatabaseByEnquiryId(currentEnquiryId)
+    : marketingDatabaseForOrderType(data.orderType);
+  return marketingDatabase.withTransaction(async (connection) => {
+    let saveStatus = action === "SUBMIT" ? "SUBMITTED" : "DRAFT";
+    let preserveExistingParts = false;
+    let existing = null;
+    let currentEnquiryId = Number(enquiryId || 0);
 
-  return withTransaction(async (connection) => {
-    const customer = await customerRepository.getCustomerById(
-      Number(data.customerId),
-      connection
-    );
+    if (currentEnquiryId) {
+      existing = await repository.getEnquiry(currentEnquiryId, connection);
 
-    if (!customer || customer.active_flag !== "Y") {
+      if (!existing) {
+        throw new AppError("Enquiry not found.", 404);
+      }
+      if (data.orderType && String(data.orderType).toUpperCase() !== String(existing.order_type).toUpperCase()) {
+        throw new AppError("Order Type cannot be changed after an enquiry is created because it determines the database.", 409);
+      }
+      data.orderType = existing.order_type;
+
+      if (existing.save_status === "SUBMITTED") {
+        if (!canEditSubmittedEnquiry(user)) {
+          throw new AppError("Only users with enquiry edit permission can change a submitted enquiry.", 403);
+        }
+        if (action === "SUBMIT") {
+          throw new AppError("This enquiry is already submitted. Use Save Changes to record an update.", 409);
+        }
+        saveStatus = "SUBMITTED";
+        preserveExistingParts = true;
+      }
+    }
+
+    validate(data, saveStatus);
+    const customerId = Number(data.customerId || 0);
+    const customer = customerId
+      ? await customerRepository.getCustomerById(customerId, db)
+      : null;
+
+    if (customerId && (!customer || customer.active_flag !== "Y")) {
       throw new AppError("Select an active customer.");
     }
 
-    let currentEnquiryId = Number(enquiryId || 0);
     let revisionSequence = 0;
     let revisionNumber = revisionLabel(revisionSequence);
     const revisionDate = currentDate();
     let revisionAction = "CREATED";
 
     if (currentEnquiryId) {
-      const existing = await repository.getEnquiry(
-        currentEnquiryId,
-        connection
-      );
-
-      if (!existing) {
-        throw new AppError("Enquiry not found.", 404);
-      }
-
-      if (existing.save_status === "SUBMITTED") {
-        throw new AppError(
-          "Submitted enquiry cannot be edited using the draft endpoint."
-        );
-      }
-
       const latestRevision =
         await repository.getLatestEnquiryRevision(
           currentEnquiryId,
@@ -314,22 +436,24 @@ async function save(enquiryId, data, userCode, action) {
         )
       );
     } else {
-      const docNo = await getNextDocumentNumber(
-        connection,
-        "ENQUIRY"
-      );
+      const docNo = marketingDatabase.key === "ATECH"
+        ? await getNextDocumentNumber(connection, "ENQUIRY")
+        : await withTransaction((masterConnection) => getNextDocumentNumber(masterConnection, "ENQUIRY"));
 
       currentEnquiryId = await repository.insertEnquiry(
         connection,
         [
           docNo,
-          Number(data.customerId),
-          customer.customer_code,
-          customer.customer_name,
-          customer.customer_short_name,
+          customerId || null,
+          customer?.customer_code || null,
+          customer?.customer_name || null,
+          customer?.customer_short_name || null,
+          clean(data.customerRepresentativeName)?.slice(0, 150) || null,
           data.enquiryMode || "MAIL",
           data.orderType || "SALES",
           clean(data.requiredDate),
+          clean(data.customerEnquiryReference),
+          clean(data.customerEnquiryDate),
           null,
           revisionNumber,
           revisionDate,
@@ -340,14 +464,17 @@ async function save(enquiryId, data, userCode, action) {
       );
     }
 
-    const resolvedParts = await resolveParts(connection, data);
+    const resolvedParts = await resolveParts(db, data, {
+      allowInactivePersistedParts: preserveExistingParts,
+    });
 
     await repository.replaceParts(
       connection,
       currentEnquiryId,
       resolvedParts,
       userCode,
-      saveStatus
+      saveStatus,
+      { preserveExistingParts }
     );
 
     if (action === "SUBMIT") {
@@ -384,23 +511,24 @@ async function save(enquiryId, data, userCode, action) {
 
     return {
       ...enquiry,
+      marketingDatabase: marketingDatabase.key,
       parts,
     };
   });
 }
 
-export function createEnquiry(data, userCode) {
-  return save(null, data, userCode, data.action || "DRAFT");
+export function createEnquiry(data, user) {
+  return save(null, data, user, data.action || "DRAFT");
 }
 
-export function updateEnquiry(enquiryId, data, userCode) {
-  return save(enquiryId, data, userCode, data.action || "DRAFT");
+export function updateEnquiry(enquiryId, data, user) {
+  return save(enquiryId, data, user, data.action || "DRAFT");
 }
 
 export async function changeEnquiryStatus(
   enquiryId,
   enquiryStatus,
-  userCode
+  user
 ) {
   if (enquiryStatus !== "ORDER_RECEIVED") {
     throw new AppError(
@@ -409,26 +537,116 @@ export async function changeEnquiryStatus(
     );
   }
 
-  const enquiry = await getEnquiry(enquiryId);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  return marketingDatabase.withTransaction(async (connection) => {
+    const enquiry = await repository.getEnquiry(enquiryId, connection);
 
-  if (enquiry.enquiry_status !== "QUOTED") {
-    throw new AppError(
-      "Only a Quoted enquiry can be changed to Order Received.",
-      409
+    if (!enquiry) throw new AppError("Enquiry not found.", 404);
+    if (enquiry.enquiry_status !== "QUOTED") {
+      throw new AppError(
+        "Only a Quoted enquiry can be changed to Order Received.",
+        409
+      );
+    }
+
+    await repository.updateEnquiryStatus(
+      enquiryId,
+      enquiryStatus,
+      typeof user === "string" ? user : user?.userCode,
+      connection
     );
-  }
-
-  await repository.updateEnquiryStatus(
-    enquiryId,
-    enquiryStatus,
-    userCode
-  );
-
-  return getEnquiry(enquiryId);
+    const updatedEnquiry = await repository.getEnquiry(enquiryId, connection);
+    await repository.appendEnquiryRevision(connection, {
+      enquiryId: Number(enquiryId),
+      revisionAction: "UPDATED",
+      saveStatus: updatedEnquiry.save_status,
+      snapshot: {
+        stage: "ENQUIRY_STATUS",
+        previousStatus: enquiry.enquiry_status,
+        currentStatus: updatedEnquiry.enquiry_status,
+      },
+      userCode: typeof user === "string" ? user : user?.userCode,
+    });
+    return { ...updatedEnquiry, marketingDatabase: marketingDatabase.key };
+  });
 }
 
-export async function submitEnquiry(enquiryId, userCode) {
-  return withTransaction(async (connection) => {
+export async function deleteEnquiry(enquiryId, userCode) {
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  return marketingDatabase.withTransaction(async (connection) => {
+    const enquiry = await repository.getEnquiry(enquiryId, connection);
+
+    if (!enquiry) {
+      throw new AppError("Enquiry not found.", 404);
+    }
+
+    const deleted = await repository.deactivateEnquiry(
+      connection,
+      enquiryId,
+      userCode
+    );
+
+    if (!deleted) {
+      throw new AppError("Enquiry not found.", 404);
+    }
+  });
+}
+
+export async function hardDeleteEnquiry(enquiryId, user) {
+  let filePaths = [];
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  try {
+    filePaths = await marketingDatabase.withTransaction(async (connection) => {
+      const enquiry = await repository.getEnquiryIncludingInactive(enquiryId, connection);
+      if (!enquiry) throw new AppError("Enquiry not found.", 404);
+      if (enquiry.active_flag !== "N") {
+        throw new AppError("Only inactive enquiries can be permanently deleted.", 409);
+      }
+      if (await repository.hasCustomerMaterialJobBalance(enquiryId)) {
+        throw new AppError(
+          "This enquiry has customer material job records and cannot be permanently deleted. Keep it inactive to preserve inventory history.",
+          409
+        );
+      }
+
+      const paths = await repository.getEnquiryHardDeleteFilePaths(enquiryId, connection);
+      const deleted = await repository.hardDeleteEnquiry(connection, enquiryId);
+      if (!deleted) throw new AppError("Enquiry is no longer inactive.", 409);
+      await recordAudit({
+        connection: db,
+        tenantId: user.tenantId,
+        module: "MARKETING",
+        entityType: "ENQUIRY",
+        entityId: enquiryId,
+        action: "ENQUIRY_HARD_DELETED",
+        oldValue: {
+          docNo: enquiry.doc_no,
+          customerId: enquiry.customer_id,
+          customerName: enquiry.customer_name_snapshot,
+          activeFlag: enquiry.active_flag,
+        },
+        performedBy: user.userCode,
+      });
+      return paths;
+    });
+  } catch (error) {
+    if (["ER_ROW_IS_REFERENCED_2", "ER_ROW_IS_REFERENCED"].includes(error.code)) {
+      throw new AppError(
+        "This enquiry is linked to operational records and cannot be permanently deleted. Keep it inactive to preserve history.",
+        409
+      );
+    }
+    throw error;
+  }
+
+  return { fileCleanupPending: await removeStoredFiles(filePaths) > 0 };
+}
+
+
+export async function submitEnquiry(enquiryId, user) {
+  const userCode = typeof user === "string" ? user : user?.userCode;
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  return marketingDatabase.withTransaction(async (connection) => {
     const enquiry = await repository.getEnquiry(enquiryId, connection);
 
     if (!enquiry) {
@@ -457,12 +675,24 @@ export async function submitEnquiry(enquiryId, userCode) {
     );
 
     await repository.submitEnquiry(connection, enquiryId, userCode);
+    const submittedEnquiry = await repository.getEnquiry(enquiryId, connection);
+    const submittedParts = await repository.getEnquiryParts(enquiryId, connection);
+    await repository.appendEnquiryRevision(connection, {
+      enquiryId: Number(enquiryId),
+      revisionAction: "SUBMITTED",
+      saveStatus: "SUBMITTED",
+      snapshot: {
+        enquiry: submittedEnquiry,
+        parts: submittedParts,
+      },
+      userCode,
+    });
 
-    return repository.getEnquiry(enquiryId, connection);
+    return { ...submittedEnquiry, marketingDatabase: marketingDatabase.key };
   });
 }
 
 export async function getEligibleQuotationParts(enquiryId) {
-  await getEnquiry(enquiryId);
-  return repository.getEligibleQuotationParts(enquiryId);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryId(enquiryId);
+  return repository.getEligibleQuotationParts(enquiryId, marketingDatabase.pool);
 }

@@ -3,6 +3,8 @@ import { api } from "./client";
 export type CustomerListParams = {
   search?: string;
   activeFlag?: "Y" | "N" | "";
+  saveStatus?: "DRAFT" | "SUBMITTED" | "";
+  includeDraft?: boolean;
   page?: number;
   pageSize?: number;
 };
@@ -10,6 +12,9 @@ export type CustomerListParams = {
 export const customerApi = {
   list: (params: CustomerListParams = {}) =>
     api.get("/customers", { params }).then((response) => response.data),
+
+  lookup: (search: string) =>
+    api.get("/customers/lookup", { params: { search } }).then((response) => response.data),
 
   getById: (customerId: number) =>
     api.get(`/customers/${customerId}`).then((response) => response.data),
@@ -24,4 +29,8 @@ export const customerApi = {
     api
       .patch(`/customers/${customerId}/status`, { customerStatus })
       .then((response) => response.data),
+
+  hardDelete: (customerId: number) =>
+    api.delete(`/customers/${customerId}`).then((response) => response.data),
+
 };

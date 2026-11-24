@@ -3,7 +3,6 @@
 export const LIST_CUSTOMERS = `
   SELECT
     customer_id AS customerId,
-    customer_type AS customerType,
     customer_code AS customerCode,
     customer_name AS customerName,
     customer_short_name AS customerShortName,
@@ -18,6 +17,7 @@ export const LIST_CUSTOMERS = `
     transport_mode,
     allowed_transport_modes,
     customer_status AS customerStatus,
+    save_status AS saveStatus,
     active_flag AS activeFlag,
     COALESCE(updated_on, created_on) AS lastUpdated
   FROM customer_master
@@ -31,11 +31,18 @@ export const LIST_CUSTOMERS = `
       ? = ''
       OR active_flag = ?
     )
+    AND (
+      ? = ''
+      OR COALESCE(save_status, 'SUBMITTED') = ?
+    )
+    AND (
+      ? = 'Y'
+      OR COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+    )
   ORDER BY
     COALESCE(updated_on, created_on) DESC,
     customer_id DESC
 `;
-
 export const COUNT_CUSTOMERS = `
   SELECT
     COUNT(*) AS total
@@ -50,6 +57,54 @@ export const COUNT_CUSTOMERS = `
       ? = ''
       OR active_flag = ?
     )
+    AND (
+      ? = ''
+      OR COALESCE(save_status, 'SUBMITTED') = ?
+    )
+    AND (
+      ? = 'Y'
+      OR COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+    )
+`;
+
+export const LOOKUP_ACTIVE_CUSTOMERS = `
+  SELECT customerId, customerCode, customerName
+  FROM (
+    SELECT
+      customer_id AS customerId,
+      customer_code AS customerCode,
+      customer_name AS customerName
+    FROM customer_master
+    WHERE active_flag = 'Y'
+      AND COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+      AND party_type IN ('CUSTOMER', 'BOTH')
+      AND customer_code LIKE CONCAT(?, '%')
+
+    UNION
+
+    SELECT
+      customer_id AS customerId,
+      customer_code AS customerCode,
+      customer_name AS customerName
+    FROM customer_master
+    WHERE active_flag = 'Y'
+      AND COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+      AND party_type IN ('CUSTOMER', 'BOTH')
+      AND customer_name LIKE CONCAT(?, '%')
+
+    UNION
+
+    SELECT
+      customer_id AS customerId,
+      customer_code AS customerCode,
+      customer_name AS customerName
+    FROM customer_master
+    WHERE active_flag = 'Y'
+      AND COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+      AND party_type IN ('CUSTOMER', 'BOTH')
+      AND customer_short_name LIKE CONCAT(?, '%')
+  ) AS customer_matches
+  ORDER BY customerName, customerCode
 `;
 
 export const GET_CUSTOMER_BY_ID = `
@@ -61,7 +116,6 @@ export const GET_CUSTOMER_BY_ID = `
 export const INSERT_CUSTOMER = `
   INSERT INTO customer_master
   (
-    customer_type,
     customer_code,
     customer_name,
     customer_short_name,
@@ -99,19 +153,19 @@ export const INSERT_CUSTOMER = `
     payment_terms,
     transport_mode,
     allowed_transport_modes,
+    save_status,
     created_by
   )
   VALUES
   (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
   )
 `;
 
 export const UPDATE_CUSTOMER = `
   UPDATE customer_master
   SET
-    customer_type = ?,
     customer_name = ?,
     customer_short_name = ?,
     plant_code = ?,
@@ -145,6 +199,7 @@ export const UPDATE_CUSTOMER = `
     payment_terms = ?,
     transport_mode = ?,
     allowed_transport_modes = ?,
+    save_status = ?,
     updated_by = ?
   WHERE customer_id = ?
 `;
@@ -157,4 +212,11 @@ export const UPDATE_CUSTOMER_STATUS = `
     deactivation_remarks = ?,
     updated_by = ?
   WHERE customer_id = ?
+`;
+
+export const HARD_DELETE_INACTIVE_CUSTOMER = `
+  DELETE FROM customer_master
+  WHERE customer_id = ?
+    AND party_type IN ('CUSTOMER', 'BOTH')
+    AND active_flag = 'N'
 `;

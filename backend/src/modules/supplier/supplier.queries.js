@@ -4,6 +4,7 @@ export const LIST_SUPPLIERS = `
   SELECT
     supplier_id AS supplierId,
     supplier_type AS supplierType,
+    supplier_category AS supplierCategory,
     supplier_code AS supplierCode,
     supplier_name AS supplierName,
     supplier_short_name AS supplierShortName,
@@ -17,6 +18,7 @@ export const LIST_SUPPLIERS = `
     transport_mode,
     allowed_transport_modes,
     supplier_status AS supplierStatus,
+    save_status AS saveStatus,
     active_flag AS activeFlag,
     COALESCE(updated_on, created_on) AS lastUpdated
   FROM supplier_master
@@ -30,11 +32,18 @@ export const LIST_SUPPLIERS = `
       ? = ''
       OR active_flag = ?
     )
+    AND (
+      ? = ''
+      OR COALESCE(save_status, 'SUBMITTED') = ?
+    )
+    AND (
+      ? = 'Y'
+      OR COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+    )
   ORDER BY
     COALESCE(updated_on, created_on) DESC,
     supplier_id DESC
 `;
-
 export const COUNT_SUPPLIERS = `
   SELECT
     COUNT(*) AS total
@@ -49,6 +58,28 @@ export const COUNT_SUPPLIERS = `
       ? = ''
       OR active_flag = ?
     )
+    AND (
+      ? = ''
+      OR COALESCE(save_status, 'SUBMITTED') = ?
+    )
+    AND (
+      ? = 'Y'
+      OR COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+    )
+`;
+
+export const LOOKUP_ACTIVE_SUPPLIERS = `
+  SELECT supplier_id AS supplierId, supplier_code AS supplierCode,
+         supplier_name AS supplierName, supplier_category AS supplierCategory
+    FROM supplier_master
+   WHERE active_flag='Y'
+     AND COALESCE(save_status, 'SUBMITTED') = 'SUBMITTED'
+     AND (
+       supplier_code LIKE CONCAT('%', ?, '%')
+       OR supplier_name LIKE CONCAT('%', ?, '%')
+       OR supplier_short_name LIKE CONCAT('%', ?, '%')
+     )
+   ORDER BY supplier_name, supplier_code
 `;
 
 export const GET_SUPPLIER_BY_ID = `
@@ -61,6 +92,7 @@ export const INSERT_SUPPLIER = `
   INSERT INTO supplier_master
   (
     supplier_type,
+    supplier_category,
     supplier_code,
     supplier_name,
     supplier_short_name,
@@ -98,12 +130,13 @@ export const INSERT_SUPPLIER = `
     payment_terms,
     transport_mode,
     allowed_transport_modes,
+    save_status,
     created_by
   )
   VALUES
   (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
   )
 `;
 
@@ -111,6 +144,7 @@ export const UPDATE_SUPPLIER = `
   UPDATE supplier_master
   SET
     supplier_type = ?,
+    supplier_category = ?,
     supplier_name = ?,
     supplier_short_name = ?,
     plant_code = ?,
@@ -144,6 +178,7 @@ export const UPDATE_SUPPLIER = `
     payment_terms = ?,
     transport_mode = ?,
     allowed_transport_modes = ?,
+    save_status = ?,
     updated_by = ?
   WHERE supplier_id = ?
 `;
@@ -156,4 +191,10 @@ export const UPDATE_SUPPLIER_STATUS = `
     deactivation_remarks = ?,
     updated_by = ?
   WHERE supplier_id = ?
+`;
+
+export const HARD_DELETE_INACTIVE_SUPPLIER = `
+  DELETE FROM supplier_master
+  WHERE supplier_id = ?
+    AND active_flag = 'N'
 `;

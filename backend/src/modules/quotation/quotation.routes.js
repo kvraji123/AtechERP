@@ -24,4 +24,9 @@ router.post(
   asyncHandler(controller.generateQuotationPdf)
 );
 
+router.post(
+  "/:enquiryId/quotation/email",
+  asyncHandler(controller.sendQuotationEmail)
+);
+
 export default router;

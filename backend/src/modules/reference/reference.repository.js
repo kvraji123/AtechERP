@@ -3,7 +3,7 @@ import { db } from "../../config/db.js";
 export async function getReferenceData(types = []) {
   const requested = [...new Set(types.map((type) => String(type || "").trim().toUpperCase()).filter(Boolean))];
   const where = requested.length ? `AND reference_type IN (${requested.map(() => "?").join(",")})` : "";
-  const [[references], [materials], [uoms], [grades]] = await Promise.all([
+  const [[references], [materials], [uoms], [grades], [departments]] = await Promise.all([
     db.execute(`SELECT reference_type AS referenceType, value_code AS value,
       display_label AS label, numeric_value AS numericValue, effective_date AS effectiveDate
       FROM marketing_reference_values WHERE active_flag='Y' ${where}
@@ -15,8 +15,11 @@ export async function getReferenceData(types = []) {
     db.query(`SELECT material_grade_id AS materialGradeId, material_id AS materialId,
       grade_code AS gradeCode, grade_name AS gradeName
       FROM material_grade_master WHERE active_flag='Y' ORDER BY grade_name`),
+    db.query(`SELECT department_id AS departmentId,department_code AS departmentCode,
+      department_name AS departmentName,display_order AS displayOrder
+      FROM department_master WHERE active_flag='Y' ORDER BY display_order,department_name`),
   ]);
-  return { references, materials, uoms, grades };
+  return { references, materials, uoms, grades, departments };
 }
 
 export async function isActiveReference(referenceType, value) {

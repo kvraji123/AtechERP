@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../../utils/asyncHandler.js";
+import { requireAdministrator } from "../../middleware/requireAdministrator.js";
 import * as controller from "./enquiry.controller.js";
 
 const router = Router();
@@ -17,6 +18,16 @@ router.get(
 );
 router.get("/:enquiryId", asyncHandler(controller.getEnquiry));
 router.post("/", asyncHandler(controller.createEnquiry));
+router.delete(
+  "/:enquiryId",
+  requireAdministrator,
+  asyncHandler(controller.deleteEnquiry)
+);
+router.delete(
+  "/:enquiryId/hard",
+  requireAdministrator,
+  asyncHandler(controller.hardDeleteEnquiry)
+);
 router.put("/:enquiryId", asyncHandler(controller.updateEnquiry));
 router.patch(
   "/:enquiryId/status",

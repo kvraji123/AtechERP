@@ -1,34 +1,48 @@
-import { CopyPlus, Link2, Plus, Trash2 } from "lucide-react";
+import { CopyPlus, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ProcessMasters } from "../../api/part.api";
+import { useAppFeedback } from "../../components/AppFeedback";
 import PartProcessPlanEditor, { blankProcessPlan,
-  type ProcessOperationRow, type ProcessPlanForm } from "./PartProcessPlanEditor";
+  type InspectionPrintContext, type ProcessOperationRow, type ProcessPlanForm, type ProcessPlanSaveOptions } from "./PartProcessPlanEditor";
 
 const sharedFields: Array<keyof ProcessOperationRow> = [
   "operationMasterId", "operationDescription", "sourceType", "machineTypeId",
   "cycleTimeSeconds", "clampingTimeSeconds", "settingTimeHours", "outsourceCostInr",
-  "processCostInr",
+  "processCostInr", "toolList", "program", "programNumber", "documentApprovals", "instructionAttachments",
 ];
 
-function definitionChanged(previous: ProcessOperationRow, next: ProcessOperationRow) {
-  return sharedFields.some((field) => JSON.stringify(previous[field]) !== JSON.stringify(next[field]));
+function sharedFieldValue(field: keyof ProcessOperationRow, value: ProcessOperationRow[keyof ProcessOperationRow]) {
+  if (field !== "instructionAttachments" || !Array.isArray(value)) return JSON.stringify(value);
+  return JSON.stringify(value.map((attachment) => ({
+    attachmentId: attachment.attachmentId,
+    attachmentName: attachment.attachmentName,
+    fileName: attachment.fileName,
+    file: attachment.file ? {
+      name: attachment.file.name,
+      size: attachment.file.size,
+      lastModified: attachment.file.lastModified,
+    } : null,
+  })));
 }
 
-function definitionValues(source: ProcessOperationRow) {
-  return Object.fromEntries(sharedFields.map((field) => [field, source[field]])) as Partial<ProcessOperationRow>;
+function definitionChanged(previous: ProcessOperationRow, next: ProcessOperationRow) {
+  return sharedFields.some((field) => sharedFieldValue(field, previous[field]) !== sharedFieldValue(field, next[field]));
 }
 
 export default function PartProcessPlanVariantsEditor({
-  value, onChange, masters, onSaveInspection, saving, readOnly = false,
+  value, onChange, masters, printContext, onSaveInspection, saving, canApproveDocuments = false, readOnly = false,
 }: {
   value: ProcessPlanForm[];
   onChange: (next: ProcessPlanForm[]) => void;
   masters: ProcessMasters;
-  onSaveInspection: () => Promise<boolean>;
+  printContext: InspectionPrintContext;
+  onSaveInspection: (nextPlans?: ProcessPlanForm[], options?: ProcessPlanSaveOptions) => Promise<boolean>;
   saving: boolean;
+  canApproveDocuments?: boolean;
   readOnly?: boolean;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const { confirmDelete } = useAppFeedback();
   const safeIndex = Math.min(activeIndex, Math.max(value.length - 1, 0));
   const activePlan = value[safeIndex];
   const usage = useMemo(() => {
@@ -62,6 +76,12 @@ export default function PartProcessPlanVariantsEditor({
       planStatus:"DRAFT",isDefault:false,activeFlag:"Y",
       operations:activePlan.operations.map((operation) => ({ ...operation,
         processOperationId:undefined,
+        processDefinitionId:undefined,
+        processDefinitionCode:undefined,
+        sharedVariantCount:1,
+        // Work instructions belong to the source operation. The cloned
+        // operation starts independently, so attach its own instructions.
+        instructionAttachments:[],
         inspectionPlan:operation.inspectionPlan ? { ...operation.inspectionPlan,
           inspectionPlanId:undefined,
           planStatus:"DRAFT",
@@ -75,13 +95,17 @@ export default function PartProcessPlanVariantsEditor({
     setActiveIndex(value.length);
   };
 
-  const deleteVariant = () => {
+  const deleteVariant = async () => {
     if (!activePlan) return;
     const retainedForHistory = Boolean(activePlan.processPlanId && activePlan.planStatus === "APPROVED");
     const message = retainedForHistory
       ? `Delete ${activePlan.planCode || activePlan.routeName}? Approved variants are retained for history and will be deactivated.`
       : `Delete ${activePlan.planCode || activePlan.routeName}? This variant will be removed when the Part is saved.`;
-    if (!window.confirm(message)) return;
+    if (!await confirmDelete({
+      title: "Delete Process Plan Variant?",
+      message,
+      confirmLabel: retainedForHistory ? "Deactivate Variant" : "Delete Variant",
+    })) return;
 
     if (retainedForHistory) {
       const remainingActive = value.findIndex((plan,index) => index !== safeIndex && plan.activeFlag === "Y");
@@ -110,27 +134,23 @@ export default function PartProcessPlanVariantsEditor({
 
   const updateActivePlan = (nextPlan: ProcessPlanForm) => {
     if (!activePlan) return;
-    const changedDefinitions = new Map<number,ProcessOperationRow>();
-    for (const nextOperation of nextPlan.operations) {
-      if (!nextOperation.processDefinitionId) continue;
+    const operations = nextPlan.operations.map((nextOperation) => {
       const previous = activePlan.operations.find((operation) =>
-        operation.processDefinitionId === nextOperation.processDefinitionId);
-      if (previous && definitionChanged(previous,nextOperation)) {
-        changedDefinitions.set(nextOperation.processDefinitionId,nextOperation);
-      }
-    }
-    onChange(value.map((plan,planIndex) => {
-      const base = planIndex === safeIndex ? nextPlan : plan;
-      let affected = planIndex === safeIndex;
-      const operations = base.operations.map((operation) => {
-        if (!operation.processDefinitionId) return operation;
-        const changed = changedDefinitions.get(operation.processDefinitionId);
-        if (!changed) return operation;
-        affected = true;
-        return { ...operation,...definitionValues(changed) };
-      });
-      return affected ? { ...base,operations,planStatus:"DRAFT" as const } : base;
-    }));
+        nextOperation.processOperationId && operation.processOperationId === nextOperation.processOperationId)
+        || activePlan.operations.find((operation) => nextOperation.processDefinitionId
+          && operation.processDefinitionId === nextOperation.processDefinitionId);
+      const wasShared = previous?.processDefinitionId
+        && (usage.get(previous.processDefinitionId) || 1) > 1;
+
+      // Older variants may still share a stored definition. On the first
+      // edit, detach this operation instead of changing another variant.
+      return wasShared && definitionChanged(previous, nextOperation)
+        ? { ...nextOperation, processDefinitionId: undefined, processDefinitionCode: undefined, sharedVariantCount: 1 }
+        : nextOperation;
+    });
+    onChange(value.map((plan,planIndex) => planIndex === safeIndex
+      ? { ...nextPlan, operations }
+      : plan));
   };
 
   if (!activePlan) return <section className="process-variant-empty">
@@ -140,7 +160,7 @@ export default function PartProcessPlanVariantsEditor({
 
   return <section className="process-variants-panel">
     <header className="process-variants-heading"><div><h3>Process Plan Variants</h3>
-      <p>Shared Process references update every linked variant.</p></div>
+      <p>Each variant has its own independent process operations.</p></div>
       {!readOnly && <button type="button" className="marketing-add-line-button" onClick={addVariant}><Plus size={15}/>New Variant</button>}
     </header>
     <div className="process-variant-tabs" role="tablist" aria-label="Process Plan Variants">
@@ -156,12 +176,15 @@ export default function PartProcessPlanVariantsEditor({
         onChange={(event) => updateMetadata({ routeName:event.target.value })}/></label>
       <label className="process-variant-default"><input type="checkbox" checked={activePlan.isDefault}
         disabled={readOnly || activePlan.activeFlag === "N"} onChange={(event) => updateMetadata({ isDefault:event.target.checked })}/>Default variant</label>
-      <span className="process-shared-notice"><Link2 size={14}/>Editing a shared Process ID updates all linked variants.</span>
       {!readOnly && <div className="process-variant-actions"><button type="button" className="secondary-action-button" onClick={cloneVariant}><CopyPlus size={15}/>Clone Variant</button>
         <button type="button" className="process-variant-delete-button" disabled={activePlan.activeFlag === "N"}
-          onClick={deleteVariant}><Trash2 size={15}/>Delete Variant</button></div>}
+          onClick={() => void deleteVariant()}><Trash2 size={15}/>Delete Variant</button></div>}
     </div>
     <PartProcessPlanEditor value={withUsage(activePlan)} onChange={updateActivePlan} masters={masters}
-      onSaveInspection={onSaveInspection} saving={saving} readOnly={readOnly || activePlan.activeFlag === "N"}/>
+      printContext={printContext} onSaveInspection={(updatedPlan, options) => {
+        if (!updatedPlan) return onSaveInspection(undefined, options);
+        return onSaveInspection(value.map((plan, index) => index === safeIndex ? updatedPlan : plan), options);
+      }} saving={saving} canApproveDocuments={canApproveDocuments}
+      readOnly={readOnly || activePlan.activeFlag === "N"}/>
   </section>;
 }

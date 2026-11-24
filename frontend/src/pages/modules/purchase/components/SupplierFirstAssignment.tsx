@@ -1,5 +1,6 @@
 import { CheckCircle2, Search, UserCheck, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useAppFeedback } from "../../../../components/AppFeedback";
 import type { RfqPurchaseRequest } from "../purchaseRfqRequests";
 import type { PurchaseEnquiryLine, SupplierOption } from "../types";
 
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export default function SupplierFirstAssignment({ lines, requests, suppliers, onChange, onAssign, saving = false, onOpenItemFirst }: Props) {
+  const { confirmAction } = useAppFeedback();
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<Set<string>>(() => new Set());
   const [supplierSearch, setSupplierSearch] = useState("");
   const [itemSearch, setItemSearch] = useState("");
@@ -53,7 +55,11 @@ export default function SupplierFirstAssignment({ lines, requests, suppliers, on
     const existingAssignmentCount = visibleLines
       .filter((line) => draftLineIds.has(line.id))
       .reduce((count, line) => count + line.selectedSupplierIds.filter((supplierId) => selectedIds.has(supplierId)).length, 0);
-    if (existingAssignmentCount && !window.confirm(`${existingAssignmentCount} selected item${existingAssignmentCount === 1 ? " is" : "s are"} already assigned to the selected supplier${selectedSuppliers.length === 1 ? "" : "s"}. Continue to update the existing assignment${existingAssignmentCount === 1 ? "" : "s"}?`)) return;
+    if (existingAssignmentCount && !await confirmAction({
+      title: "Update Existing Supplier Assignments?",
+      message: `${existingAssignmentCount} selected item${existingAssignmentCount === 1 ? " is" : "s are"} already assigned to the selected supplier${selectedSuppliers.length === 1 ? "" : "s"}. Continue to update the existing assignment${existingAssignmentCount === 1 ? "" : "s"}?`,
+      confirmLabel: "Continue",
+    })) return;
     const nextLines = lines.map((line) => !visibleIds.has(line.id) ? line : {
       ...line,
       selected: draftLineIds.has(line.id) || line.selected,

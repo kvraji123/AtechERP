@@ -63,7 +63,8 @@ try {
     "purchase_requests", "purchase_request_items", "purchase_request_approval_history",
     "purchase_enquiries", "purchase_enquiry_items", "purchase_enquiry_item_suppliers",
     "supplier_quotations", "supplier_quotation_items", "purchase_supplier_selections", "grn_inspection_characteristics", "inventory_stock_balance", "inventory_stock_transaction", "gauge_movement_batches",
-    "rejection_reason_master", "rejection_disposition_master", "grn_rejection_records", "grn_rejection_attachments", "inventory_rejection_balance", "inventory_rejection_transaction", "return_to_vendor_documents", "return_to_vendor_document_items", "rejection_resolution_requests", "inventory_rework_balance", "customer_material_job_balance", "customer_material_job_transaction", "return_to_customer_documents", "return_to_customer_document_items", "outsourcing_wip_balance", "outsourcing_wip_transaction",
+    "rejection_reason_master", "rejection_disposition_master", "grn_rejection_records", "grn_rejection_attachments", "inventory_rejection_balance", "inventory_rejection_transaction", "return_to_vendor_documents", "return_to_vendor_document_items", "rejection_resolution_requests", "inventory_rework_balance", "customer_material_job_balance", "customer_material_job_transaction", "return_to_customer_documents", "return_to_customer_document_items", "outsourcing_wip_balance", "outsourcing_wip_transaction", "material_outward_documents", "material_outward_document_items", "outsourcing_issue_wip_balance",
+    "tooling_stock_balance", "tooling_item_metrics", "tooling_regrind_batches", "tooling_regrind_batch_items", "tooling_stock_movements", "tooling_regrind_inspection_measurements",
   ];
   const missing = required.filter((name) => !names.has(name));
   if (missing.length) throw new Error(`Missing production tables: ${missing.join(", ")}`);

@@ -14,6 +14,12 @@ export async function listSuppliers(req, res) {
   });
 }
 
+export async function lookupActiveSuppliers(req, res) {
+  return sendSuccess(res, {
+    data: await service.lookupActiveSuppliers(req.query),
+  });
+}
+
 export async function getSupplier(req, res) {
   const supplier = await service.getSupplier(req.params.supplierId);
   return sendSuccess(res, { data: supplier });
@@ -22,7 +28,7 @@ export async function getSupplier(req, res) {
 export async function createSupplier(req, res) {
   const result = await service.createSupplier(
     req.body,
-    req.user.userCode
+    req.user
   );
 
   return sendSuccess(res, {
@@ -36,7 +42,7 @@ export async function updateSupplier(req, res) {
   const supplier = await service.updateSupplier(
     req.params.supplierId,
     req.body,
-    req.user.userCode
+    req.user
   );
 
   return sendSuccess(res, {
@@ -55,5 +61,13 @@ export async function changeSupplierStatus(req, res) {
   return sendSuccess(res, {
     message: "Supplier status updated successfully.",
     data: supplier,
+  });
+}
+
+export async function hardDeleteSupplier(req, res) {
+  await service.hardDeleteSupplier(req.params.supplierId, req.user);
+
+  return sendSuccess(res, {
+    message: "Inactive supplier permanently deleted.",
   });
 }

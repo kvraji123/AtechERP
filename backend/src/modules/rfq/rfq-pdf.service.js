@@ -23,7 +23,7 @@ function addHeader(doc, source) {
   doc.fillColor("#102a43").font("Helvetica-Bold").fontSize(18).text("Atech Automation", 48, 48, { width: 500, align: "center" });
   doc.fillColor("#c73b32").fontSize(13).text("REQUEST FOR QUOTATION", 48, 74, { width: 500, align: "center" });
   doc.strokeColor("#c73b32").lineWidth(1.5).moveTo(48, 98).lineTo(547, 98).stroke();
-  doc.fillColor("#1e293b").font("Helvetica-Bold").fontSize(9).text("RFQ No.", 48, 116).font("Helvetica").text(source.enquiryNumber, 128, 116, { width: 190 });
+  doc.fillColor("#1e293b").font("Helvetica-Bold").fontSize(8).text("RFQ / Purchase Enquiry No.", 48, 116).font("Helvetica").fontSize(9).text(source.enquiryNumber, 184, 116, { width: 158 });
   doc.font("Helvetica-Bold").text("RFQ Date", 350, 116).font("Helvetica").text(dateText(source.enquiryDate), 416, 116, { width: 131 });
   doc.font("Helvetica-Bold").text("Due Date", 48, 134).font("Helvetica").text(dateText(source.quoteDueDate), 128, 134, { width: 190 });
   doc.font("Helvetica-Bold").text("Delivery By", 350, 134).font("Helvetica").text(dateText(source.deliveryRequiredBy), 416, 134, { width: 131 });

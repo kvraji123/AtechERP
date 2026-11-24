@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS customer_master (
   party_type ENUM('CUSTOMER', 'SUPPLIER', 'BOTH') NOT NULL DEFAULT 'CUSTOMER',
   customer_code VARCHAR(50) NOT NULL,
   customer_type VARCHAR(100) NULL,
-  customer_name VARCHAR(200) NOT NULL,
+  customer_name VARCHAR(200) NULL,
   customer_short_name VARCHAR(100) NULL,
   plant_code VARCHAR(50) NULL,
   billing_address TEXT NULL,
@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS customer_master (
   ifsc_code VARCHAR(30) NULL,
   pan_tan_number VARCHAR(30) NULL,
   customer_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
   deactivation_remarks VARCHAR(500) NULL,
   other_legal_requirements TEXT NULL,
@@ -58,14 +59,17 @@ CREATE TABLE IF NOT EXISTS customer_master (
   PRIMARY KEY (customer_id),
   UNIQUE KEY uq_customer_code (customer_code),
   KEY ix_customer_name (customer_name),
-  KEY ix_customer_active (active_flag)
+  KEY ix_customer_active (active_flag),
+  KEY ix_customer_lookup_code (active_flag, party_type, customer_code),
+  KEY ix_customer_lookup_name (active_flag, party_type, customer_name),
+  KEY ix_customer_lookup_short_name (active_flag, party_type, customer_short_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS part_master (
   part_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  customer_id BIGINT UNSIGNED NOT NULL,
-  part_category ENUM('MACHINING', 'ASSEMBLY') NOT NULL,
-  part_name VARCHAR(200) NOT NULL,
+  customer_id BIGINT UNSIGNED NULL,
+  part_category ENUM('MACHINING', 'ASSEMBLY') NULL,
+  part_name VARCHAR(200) NULL,
   part_number VARCHAR(100) NOT NULL,
   drawing_number VARCHAR(100) NULL,
   drawing_revision_number VARCHAR(50) NULL,
@@ -75,8 +79,14 @@ CREATE TABLE IF NOT EXISTS part_master (
   material_specification VARCHAR(300) NULL,
   part_weight DECIMAL(14,3) NULL,
   unit_of_measurement VARCHAR(30) NULL,
-  part_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  part_status ENUM('ACTIVE', 'INACTIVE', 'DRAWING_UNDER_REVISION') NOT NULL DEFAULT 'ACTIVE',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  revision_source_part_id BIGINT UNSIGNED NULL,
+  bom_release_status ENUM('DRAFT', 'RELEASED', 'NOT_REQUIRED') NOT NULL DEFAULT 'NOT_REQUIRED',
+  bom_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  bom_released_by VARCHAR(50) NULL,
+  bom_released_on DATETIME NULL,
   project_name VARCHAR(200) NULL,
   deactivation_remarks VARCHAR(500) NULL,
   created_by VARCHAR(50) NOT NULL,
@@ -85,11 +95,16 @@ CREATE TABLE IF NOT EXISTS part_master (
   updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (part_id),
   UNIQUE KEY uq_part_number (part_number),
+  UNIQUE KEY uq_part_master_drawing_code (drawing_code),
   KEY ix_part_customer (customer_id),
   KEY ix_part_name (part_name),
   KEY ix_part_active (active_flag),
+  KEY ix_part_revision_source (revision_source_part_id),
   CONSTRAINT fk_part_customer
     FOREIGN KEY (customer_id) REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_part_revision_source
+    FOREIGN KEY (revision_source_part_id) REFERENCES part_master (part_id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -97,7 +112,8 @@ INSERT INTO app_document_sequences
   (sequence_key, financial_year, prefix, current_number, number_padding)
 VALUES
   ('CUSTOMER', '2026-27', 'CUS', 0, 4),
-  ('PART', '2026-27', 'PRT', 0, 4)
+  ('PART', '2026-27', 'PRT', 0, 4),
+  ('DRAWING_CODE', 'GLOBAL', '', 0, 1)
 ON DUPLICATE KEY UPDATE
   prefix = VALUES(prefix),
   number_padding = VALUES(number_padding);

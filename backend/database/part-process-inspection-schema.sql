@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS inspection_instrument_master (
   instrument_code VARCHAR(30) NOT NULL,
   instrument_name VARCHAR(150) NOT NULL,
   active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (instrument_master_id),
   UNIQUE KEY uq_inspection_instrument_code (instrument_code),
   UNIQUE KEY uq_inspection_instrument_name (instrument_name)
@@ -100,6 +102,8 @@ CREATE TABLE IF NOT EXISTS tolerance_grade_master (
   lower_deviation_microns DECIMAL(12,4) NOT NULL DEFAULT 0,
   upper_deviation_microns DECIMAL(12,4) NOT NULL DEFAULT 0,
   active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (tolerance_grade_id),
   UNIQUE KEY uq_tolerance_grade_range (grade_code,basic_size_from,basic_size_to)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -162,7 +166,10 @@ CREATE TABLE IF NOT EXISTS part_operation_inspection_plan (
   inspection_plan_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   process_operation_id BIGINT UNSIGNED NOT NULL,
   cmm_required ENUM('Y','N') NOT NULL DEFAULT 'N',
+  measurement_unit ENUM('MM','INCH') NOT NULL DEFAULT 'MM',
+  tolerance_standard_id BIGINT UNSIGNED NULL,
   plan_status ENUM('DRAFT','READY') NOT NULL DEFAULT 'DRAFT',
+  approval_status ENUM('DRAFT','APPROVED') NOT NULL DEFAULT 'DRAFT',
   created_by VARCHAR(50) NOT NULL,
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (inspection_plan_id),
@@ -191,6 +198,7 @@ CREATE TABLE IF NOT EXISTS part_inspection_characteristic (
   sample_size VARCHAR(50) NULL,
   inspection_frequency VARCHAR(100) NULL,
   sc_cc_identification ENUM('Y','N') NOT NULL DEFAULT 'N',
+  patrol_inspection_qa_required ENUM('Y','N') NOT NULL DEFAULT 'N',
   patrol_qa_result ENUM('OK','NOT_OK') NULL,
   periodic_operator_required ENUM('Y','N') NOT NULL DEFAULT 'N',
   final_inspection_required ENUM('Y','N') NOT NULL DEFAULT 'N',
@@ -212,6 +220,64 @@ CREATE TABLE IF NOT EXISTS part_inspection_characteristic (
 
 ALTER TABLE part_process_operation MODIFY operation_master_id BIGINT UNSIGNED NULL;
 ALTER TABLE part_inspection_characteristic MODIFY characteristic_master_id BIGINT UNSIGNED NULL;
+
+-- The inbuilt Tool List modal is stored with the reusable process definition.
+-- The JSON includes its header, tool rows, cost-per-component rows and sign-off fields.
+SET @has_process_tool_list_data := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_definition'
+    AND COLUMN_NAME='tool_list_data'
+);
+SET @has_process_definition_table := (
+  SELECT COUNT(*) FROM information_schema.TABLES
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_definition'
+);
+SET @process_tool_list_data_sql := IF(@has_process_definition_table=1 AND @has_process_tool_list_data=0,
+  'ALTER TABLE part_process_definition ADD COLUMN tool_list_data JSON NULL',
+  'SELECT 1');
+PREPARE process_tool_list_data_statement FROM @process_tool_list_data_sql;
+EXECUTE process_tool_list_data_statement;
+DEALLOCATE PREPARE process_tool_list_data_statement;
+
+-- Program documents are entered in the inbuilt Program modal. The JSON keeps
+-- the NC/program text and its per-operation revision trail together.
+SET @has_process_program_data := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_definition'
+    AND COLUMN_NAME='program_data'
+);
+SET @process_program_data_sql := IF(@has_process_definition_table=1 AND @has_process_program_data=0,
+  'ALTER TABLE part_process_definition ADD COLUMN program_data JSON NULL',
+  'SELECT 1');
+PREPARE process_program_data_statement FROM @process_program_data_sql;
+EXECUTE process_program_data_statement;
+DEALLOCATE PREPARE process_program_data_statement;
+
+-- Explicit document approvals are held at the process-definition level so
+-- shared process variants keep the same Program, Tool List and Work Instruction approval state.
+SET @has_process_document_approval_data := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_process_definition'
+    AND COLUMN_NAME='document_approval_data'
+);
+SET @process_document_approval_data_sql := IF(@has_process_definition_table=1 AND @has_process_document_approval_data=0,
+  'ALTER TABLE part_process_definition ADD COLUMN document_approval_data JSON NULL AFTER program_data',
+  'SELECT 1');
+PREPARE process_document_approval_data_statement FROM @process_document_approval_data_sql;
+EXECUTE process_document_approval_data_statement;
+DEALLOCATE PREPARE process_document_approval_data_statement;
+
+SET @has_inspection_approval_status := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_operation_inspection_plan'
+    AND COLUMN_NAME='approval_status'
+);
+SET @inspection_approval_status_sql := IF(@has_inspection_approval_status=0,
+  "ALTER TABLE part_operation_inspection_plan ADD COLUMN approval_status ENUM('DRAFT','APPROVED') NOT NULL DEFAULT 'DRAFT' AFTER plan_status",
+  'SELECT 1');
+PREPARE inspection_approval_status_statement FROM @inspection_approval_status_sql;
+EXECUTE inspection_approval_status_statement;
+DEALLOCATE PREPARE inspection_approval_status_statement;
 
 SET @has_process_machine_type := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
@@ -255,6 +321,18 @@ SET @cmm_required_sql := IF(@has_cmm_required=0,
 PREPARE cmm_required_statement FROM @cmm_required_sql;
 EXECUTE cmm_required_statement;
 DEALLOCATE PREPARE cmm_required_statement;
+
+SET @has_inspection_measurement_unit := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_operation_inspection_plan'
+    AND COLUMN_NAME='measurement_unit'
+);
+SET @inspection_measurement_unit_sql := IF(@has_inspection_measurement_unit=0,
+  "ALTER TABLE part_operation_inspection_plan ADD COLUMN measurement_unit ENUM('MM','INCH') NOT NULL DEFAULT 'MM' AFTER cmm_required",
+  'SELECT 1');
+PREPARE inspection_measurement_unit_statement FROM @inspection_measurement_unit_sql;
+EXECUTE inspection_measurement_unit_statement;
+DEALLOCATE PREPARE inspection_measurement_unit_statement;
 
 SET @has_tolerance_grade_text := (
   SELECT COUNT(*) FROM information_schema.COLUMNS
@@ -404,13 +482,12 @@ INSERT INTO inspection_instrument_master (instrument_code,instrument_name) VALUE
 ON DUPLICATE KEY UPDATE instrument_name=VALUES(instrument_name),active_flag='Y';
 
 INSERT INTO inspection_sample_size_master (sample_size_code,sample_size_label,display_order) VALUES
- ('1','1',10),('2','2',20),('3','3',30),('5','5',40),('10','10',50),('100_PERCENT','100%',60)
+ ('100_PERCENT','100%',10),('1','1',20),('2','2',30),('3','3',40),('5','5',50)
 ON DUPLICATE KEY UPDATE sample_size_label=VALUES(sample_size_label),display_order=VALUES(display_order),active_flag='Y';
 
 INSERT INTO inspection_frequency_master (frequency_code,frequency_label,display_order) VALUES
- ('EVERY_PART','Every Part',10),('EVERY_5','Every 5 Parts',20),('EVERY_10','Every 10 Parts',30),
- ('HOURLY','Hourly',40),('PER_SHIFT','Once per Shift',50),('ONCE_PER_LOT','Once per Lot',55),
- ('FIRST_LAST','First & Last Part',60),('FINAL','Final Inspection',70)
+ ('100_PERCENT','100%',10),('5','5',20),('10','10',30),('15','15',40),('20','20',50),
+ ('25','25',60),('50','50',70),('SHIFT','Shift',80),('LOT','Lot',90),('DAY','Day',100),('WEEK','Week',110)
 ON DUPLICATE KEY UPDATE frequency_label=VALUES(frequency_label),display_order=VALUES(display_order),active_flag='Y';
 
 INSERT INTO tolerance_grade_master

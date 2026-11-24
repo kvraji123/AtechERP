@@ -1,22 +1,23 @@
-import fs from "node:fs/promises";
-
 import { db } from "../src/config/db.js";
 
-try {
-  const [columns] = await db.query(
-    "SHOW COLUMNS FROM marketing_workouts LIKE 'sample_cost_inr'"
+async function addColumnIfMissing(columnName, definition) {
+  const [columns] = await db.execute(
+    `SELECT COUNT(*) AS total
+       FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'marketing_workouts'
+        AND column_name = ?`,
+    [columnName]
   );
-
-  if (!columns.length) {
-    const sql = await fs.readFile(
-      new URL("../database/workout-sample-cost-migration.sql", import.meta.url),
-      "utf8"
-    );
-    await db.query(sql.trim());
-    console.log("Workout Sample Cost column added successfully.");
-  } else {
-    console.log("Workout Sample Cost column already exists; no change was needed.");
+  if (!Number(columns[0].total)) {
+    await db.query(`ALTER TABLE marketing_workouts ADD COLUMN ${columnName} ${definition}`);
   }
+}
+
+try {
+  await addColumnIfMissing("sample_cost_inr", "DECIMAL(18,4) NOT NULL DEFAULT 0 AFTER trial_cost_inr");
+  await addColumnIfMissing("sample_cost_percent", "DECIMAL(7,4) NOT NULL DEFAULT 0 AFTER trial_cost_inr");
+  console.log("Workout sample-cost percentage and calculated sample-cost fields are ready.");
 } finally {
   await db.end();
 }

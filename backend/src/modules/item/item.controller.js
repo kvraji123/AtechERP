@@ -9,6 +9,12 @@ export async function listItems(req, res) {
 export async function getLookups(_req, res) { return sendSuccess(res, { data: await service.getLookups() }); }
 export async function createItemCategory(req, res) { return sendSuccess(res, { statusCode: 201,
   message: "Item Category added successfully.", data: await service.createItemCategory(req.body, req.user.userCode) }); }
+export async function retireItemCategory(req, res) { return sendSuccess(res, { message: "Item Category retired successfully.",
+  data: await service.retireItemCategory(req.params.itemTypeId, req.user.userCode) }); }
+export async function addSpecificationOption(req, res) { return sendSuccess(res, { statusCode: 201,
+  message: "List value added successfully.", data: await service.addSpecificationOption(req.body) }); }
+export async function retireSpecificationOption(req, res) { return sendSuccess(res, { message: "List value retired successfully.",
+  data: await service.retireSpecificationOption(req.body) }); }
 export async function getItem(req, res) { return sendSuccess(res, { data: await service.getItem(req.params.itemId) }); }
 export async function createItem(req, res) { return sendSuccess(res, { statusCode: 201,
   message: "Item created successfully.", data: await service.createItem(req.body, req.user.userCode) }); }

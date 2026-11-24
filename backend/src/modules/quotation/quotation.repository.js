@@ -8,16 +8,22 @@ const optionalDevelopmentCostDefinitions = [
   { field: "trial_development_cost_foreign", costType: "TRIAL" },
 ];
 
-export async function getEnquiry(enquiryId, connection = db) {
+export async function getEnquiry(enquiryId, connection = db, masterConnection = connection) {
   const [rows] = await connection.execute(
-    `SELECT E.*, C.customer_code, C.billing_address, C.delivery_address,
-            C.email_address, C.contact_person_name, C.phone_number, C.mobile_number
-       FROM marketing_enquiries E
-       INNER JOIN customer_master C ON C.customer_id=E.customer_id
-      WHERE E.enquiry_id=?`,
+    `SELECT E.* FROM marketing_enquiries E WHERE E.enquiry_id=?`,
     [Number(enquiryId)]
   );
-  return rows[0] || null;
+  if (!rows[0]) return null;
+  const enquiry = rows[0];
+  const [customers] = enquiry.customer_id
+    ? await masterConnection.execute(
+      `SELECT customer_code,billing_address,delivery_address,email_address,
+              contact_person_name,phone_number,mobile_number
+         FROM customer_master WHERE customer_id=?`,
+      [Number(enquiry.customer_id)]
+    )
+    : [[]];
+  return { ...enquiry, ...(customers[0] || {}) };
 }
 
 export async function getDefaultNotes(connection = db) {
@@ -33,9 +39,13 @@ export async function getDefaultNotes(connection = db) {
 
 export async function getQuotation(enquiryId, connection = db) {
   const [rows] = await connection.execute(
-    `SELECT * FROM marketing_quotations
-      WHERE enquiry_id=? AND active_flag='Y'
-      ORDER BY quotation_id DESC LIMIT 1`,
+    `SELECT Q.*, E.order_type AS enquiry_order_type,
+            E.customer_enquiry_reference, E.customer_enquiry_date,
+            E.customer_representative_name
+       FROM marketing_quotations Q
+       INNER JOIN marketing_enquiries E ON E.enquiry_id=Q.enquiry_id
+      WHERE Q.enquiry_id=? AND Q.active_flag='Y'
+      ORDER BY Q.quotation_id DESC LIMIT 1`,
     [Number(enquiryId)]
   );
   if (!rows.length) return null;
@@ -180,15 +190,15 @@ export async function replaceQuotationItems(connection, enquiryId, parts, userCo
         machining_drawing_number,revision_number,description,annual_quantity,
         required_quantity,moq,material,weight_kg,currency_code,
         part_price_fob_inr,part_price_fob_foreign,
-        total_development_cost_inr,total_development_cost_foreign,
+        total_development_cost_inr,total_development_cost_foreign,sample_cost_inr,
         active_flag,created_by
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'Y',?)`,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'Y',?)`,
       [id,part.enquiry_part_id,part.workout_id,part.process_plan_id,index+1,part.item_code,
         part.drawing_number,part.drawing_revision_number,part.product_description,
         part.annual_quantity,part.required_quantity,part.moq,part.material_and_grade,
         part.weight_kg,part.currency_code,part.final_part_price_fob_inr,
         part.final_part_price_fob_foreign,part.total_development_cost_inr,
-        part.total_development_cost_foreign,userCode]
+        part.total_development_cost_foreign,part.sample_cost_inr,userCode]
     );
     for (const [costIndex, definition] of selectedDefinitions.entries()) {
       const amount = Number(part[definition.field] || 0);

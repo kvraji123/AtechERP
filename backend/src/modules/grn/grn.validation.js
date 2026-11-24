@@ -42,10 +42,14 @@ export function validateGrn(data = {}) {
     const rate = customerSupplied ? 0 : Number(row.directRatePerQty ?? row.ratePerQty ?? 0);
     const tax = customerSupplied ? 0 : Number(row.taxPercent ?? 0);
     if (!Number.isFinite(rate) || rate < 0 || !Number.isFinite(tax) || tax < 0 || tax > 100) throw new AppError(`Enter a non-negative rate and tax between 0 and 100 at row ${index + 1}.`);
-    return { ...row, itemId: outsourcingProduct ? null : itemId, purchaseOrderItemId: direct ? null : poItemId, batchSerialNumber, receivedQuantity: received, directRatePerQty: rate, taxPercent: tax, acceptedQuantity: 0, rejectedQuantity: 0 };
+    const inspectionRequired = !outsourcingProduct && (row.inspectionRequired === undefined
+      ? data.inspectionRequired !== false
+      : !["N", "NO", "FALSE", "0"].includes(String(row.inspectionRequired).trim().toUpperCase()));
+    return { ...row, itemId: outsourcingProduct ? null : itemId, purchaseOrderItemId: direct ? null : poItemId, batchSerialNumber, receivedQuantity: received, directRatePerQty: rate, taxPercent: tax, inspectionRequired, acceptedQuantity: 0, rejectedQuantity: 0 };
   });
   if ((isOpenPurchase || outsourcingProduct) && !Number(data.supplierId)) throw new AppError("Select a supplier for this receipt type.");
-  return { ...data, purchaseOrderId, supplierId: customerSupplied ? null : Number(data.supplierId) || null, gateEntryId, grnDate: date, receiptType, customerId: customerSupplied ? customerId : null, customerName: customerSupplied ? customerName : null, customerPlantCode: customerSupplied ? customerPlantCode : null, supplierInvoiceNumber: customerSupplied ? null : data.supplierInvoiceNumber, supplierInvoiceDate: customerSupplied ? null : data.supplierInvoiceDate, jobReference, items, action };
+  const inspectionRequired = !outsourcingProduct && items.some((item) => item.inspectionRequired);
+  return { ...data, purchaseOrderId, supplierId: customerSupplied ? null : Number(data.supplierId) || null, gateEntryId, grnDate: date, receiptType, customerId: customerSupplied ? customerId : null, customerName: customerSupplied ? customerName : null, customerPlantCode: customerSupplied ? customerPlantCode : null, supplierInvoiceNumber: customerSupplied ? null : data.supplierInvoiceNumber, supplierInvoiceDate: customerSupplied ? null : data.supplierInvoiceDate, jobReference, items, inspectionRequired, action };
 }
 
 export function validateGrnStockPosting(data = {}) {
@@ -58,12 +62,13 @@ export function validateGrnStockPosting(data = {}) {
   const items = data.items.map((row, index) => {
     const grnItemId = Number(row.grnItemId);
     const warehouseCode = String(row.warehouseCode || row.warehouse || "").trim();
+    const subinventoryCode = String(row.subinventoryCode || row.subInventoryCode || "").trim().toUpperCase();
     const binLocation = String(row.binLocation || "").trim();
     const batchSerialNumber = String(row.batchSerialNumber || "").trim();
     if (!grnItemId || seen.has(grnItemId)) throw new AppError(`Invalid or duplicate stock receipt line at row ${index + 1}.`);
-    if (!warehouseCode || !binLocation) throw new AppError(`Warehouse and bin location are required at row ${index + 1}.`);
+    if (!warehouseCode || !subinventoryCode || !binLocation) throw new AppError(`Warehouse, sub-inventory, and bin location are required at row ${index + 1}.`);
     seen.add(grnItemId);
-    return { grnItemId, warehouseCode, binLocation, batchSerialNumber };
+    return { grnItemId, warehouseCode, subinventoryCode, binLocation, batchSerialNumber };
   });
   return { stockPostingDate, receivedBy, items };
 }

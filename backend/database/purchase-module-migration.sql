@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   item_type_snapshot VARCHAR(120) NOT NULL,
   item_description_snapshot VARCHAR(250) NOT NULL,
   item_specification_snapshot VARCHAR(1000) NULL,
+  other_specification VARCHAR(1000) NULL,
   uom_code_snapshot VARCHAR(30) NOT NULL,
   hsn_code_snapshot VARCHAR(20) NULL,
   ordered_quantity DECIMAL(18,3) NOT NULL,

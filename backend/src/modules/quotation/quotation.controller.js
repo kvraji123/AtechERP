@@ -37,3 +37,10 @@ export async function generateQuotationPdf(req, res) {
     data: await service.generatePdf(req.params.enquiryId, req.user),
   });
 }
+
+export async function sendQuotationEmail(req, res) {
+  return sendSuccess(res, {
+    message: "Quotation email sent successfully.",
+    data: await service.sendEmail(req.params.enquiryId, req.body, req.user),
+  });
+}

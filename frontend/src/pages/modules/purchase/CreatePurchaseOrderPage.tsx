@@ -72,6 +72,7 @@ type BackendPurchaseOrderDetail = {
     item_code_snapshot: string;
     item_description_snapshot: string;
     item_specification_snapshot?: string | null;
+    other_specification?: string | null;
     ordered_quantity: number | string;
     uom_code_snapshot: string;
     unit_price: number | string;
@@ -199,9 +200,9 @@ export default function CreatePurchaseOrderPage() {
             transportMode: order.transport_mode || "",
             billingAddress: order.billing_address_snapshot || "",
             deliveryAddress: order.delivery_address_snapshot || "",
-            packingCharges: Number(order.packing_amount || 0),
-            freightCharges: Number(order.freight_amount || 0),
-            otherCharges: Number(order.other_charges_amount || 0),
+            packingCharges: Number(order.packing_amount || 0) || "",
+            freightCharges: Number(order.freight_amount || 0) || "",
+            otherCharges: Number(order.other_charges_amount || 0) || "",
             remarks: order.remarks || "",
             specialInstructions: order.special_instructions || "",
           },
@@ -212,6 +213,7 @@ export default function CreatePurchaseOrderPage() {
             itemCode: item.item_code_snapshot || "",
             itemName: item.item_description_snapshot || "",
             specification: item.item_specification_snapshot || "",
+            otherSpecification: item.other_specification || "",
             quantity: Number(item.ordered_quantity || 0),
             uom: item.uom_code_snapshot || "",
             rate: Number(item.unit_price || 0),
@@ -290,9 +292,9 @@ export default function CreatePurchaseOrderPage() {
             transportMode: "",
             billingAddress: "Atech Automation · Coimbatore",
             deliveryAddress: "Atech Coimbatore / Main Stores",
-            packingCharges: 0,
-            freightCharges: 0,
-            otherCharges: 0,
+            packingCharges: "",
+            freightCharges: "",
+            otherCharges: "",
             remarks: `Direct PO from approved existing-item requisitions ${sourceNumbers.join(", ")}. RFQ not required.`,
             specialInstructions: "Mention PO number on invoice and delivery challan. Supply the approved items as per specification.",
           },
@@ -339,6 +341,7 @@ export default function CreatePurchaseOrderPage() {
       rate: line.rate,
       discount: line.discount || 0,
       taxPercent: line.taxPercent,
+      otherSpecification: line.otherSpecification?.trim() || null,
       packing: activeDraft.form.mode === "DIRECT_PR" && index === 0 ? Number(activeDraft.form.packingCharges || 0) : 0,
       freight: activeDraft.form.mode === "DIRECT_PR" && index === 0 ? Number(activeDraft.form.freightCharges || 0) : line.freightAndOther || 0,
       otherCharges: activeDraft.form.mode === "DIRECT_PR" && index === 0 ? Number(activeDraft.form.otherCharges || 0) : 0,

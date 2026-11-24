@@ -14,6 +14,11 @@ export async function listCustomers(req, res) {
   });
 }
 
+export async function lookupActiveCustomers(req, res) {
+  const customers = await service.lookupActiveCustomers(req.query);
+  return sendSuccess(res, { data: customers });
+}
+
 export async function getCustomer(req, res) {
   const customer = await service.getCustomer(req.params.customerId);
   return sendSuccess(res, { data: customer });
@@ -22,7 +27,7 @@ export async function getCustomer(req, res) {
 export async function createCustomer(req, res) {
   const result = await service.createCustomer(
     req.body,
-    req.user.userCode
+    req.user
   );
 
   return sendSuccess(res, {
@@ -36,7 +41,7 @@ export async function updateCustomer(req, res) {
   const customer = await service.updateCustomer(
     req.params.customerId,
     req.body,
-    req.user.userCode
+    req.user
   );
 
   return sendSuccess(res, {
@@ -55,5 +60,13 @@ export async function changeCustomerStatus(req, res) {
   return sendSuccess(res, {
     message: "Customer status updated successfully.",
     data: customer,
+  });
+}
+
+export async function hardDeleteCustomer(req, res) {
+  await service.hardDeleteCustomer(req.params.customerId, req.user);
+
+  return sendSuccess(res, {
+    message: "Inactive customer permanently deleted.",
   });
 }

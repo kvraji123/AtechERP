@@ -747,3 +747,14 @@
     padding-left: 14px;
   }
 }
+ .master-read-only-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.master-read-only-fields:disabled {
+  opacity: 1;
+}
+

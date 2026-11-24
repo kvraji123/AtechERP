@@ -156,6 +156,52 @@
   color: #b43830;
 }
 
+.master-record-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.master-record-link {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #354092;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.master-record-link:hover,
+.master-record-link:focus-visible {
+  color: #b43830;
+  text-decoration: underline;
+}
+
+.master-record-edit {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #dfe1e7;
+  border-radius: 7px;
+  background: #fff;
+  color: #626675;
+  cursor: pointer;
+}
+
+.master-record-edit:hover,
+.master-record-edit:focus-visible {
+  border-color: #cea7a3;
+  background: #fff7f6;
+  color: #b43830;
+}
+
 .master-status-badge {
   display: inline-flex;
   align-items: center;

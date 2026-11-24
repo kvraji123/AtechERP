@@ -1,13 +1,5 @@
 import type { PurchaseApprovalRequest, PurchaseEnquiryLine, PurchaseRequestLine, SupplierOption } from "./types";
 
-export const departmentOptions = [
-  "Production — Assembly",
-  "Production — Machine Shop",
-  "Maintenance",
-  "Quality",
-  "Stores",
-];
-
 export const supplierOptions: SupplierOption[] = [
   { id: "SUP-001", code: "SUP-001", name: "Nova Industrial Supply", rating: 4.8, leadTime: "5–7 days" },
   { id: "SUP-002", code: "SUP-002", name: "Prime Motion Systems", rating: 4.6, leadTime: "7–9 days" },

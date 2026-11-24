@@ -12,5 +12,10 @@
 .item-inspection-badge { display:inline-flex; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:800; }
 .item-inspection-badge.required { color:#9d241e; background:#fff0ee; }
 .item-inspection-badge.optional { color:#536170; background:#edf1f5; }
+.item-code-actions { display:inline-flex; align-items:center; gap:6px; }
+.item-code-link { padding:0; border:0; background:transparent; color:#173e91; font:inherit; font-weight:800; cursor:pointer; text-align:left; }
+.item-code-link:hover, .item-code-link:focus-visible { color:#b83228; text-decoration:underline; outline:none; }
+.item-code-edit { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0; border:1px solid #d8dfeb; border-radius:6px; color:#34558c; background:#fff; cursor:pointer; }
+.item-code-edit:hover, .item-code-edit:focus-visible { color:#b83228; border-color:#b83228; background:#fff5f3; outline:none; }
 @media (max-width:1100px) { .item-filter-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .item-filter-grid .master-search-box { grid-column:1 / -1; } }
 @media (max-width:640px) { .item-filter-grid { grid-template-columns:1fr; } .item-filter-grid .master-search-box { grid-column:auto; } .item-master-header-actions { width:100%; flex-wrap:wrap; } }

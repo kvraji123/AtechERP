@@ -73,7 +73,10 @@ export async function getWorkout(enquiryPartId, connection = db) {
     connection.execute(
       `SELECT workout_process_cost_id AS workoutProcessCostId,
               process_type AS processType,
-              process_description AS description, cost_inr AS costInr,
+              process_description AS description,
+              total_cycle_time_seconds AS totalCycleTimeSeconds,
+              machine_cost_inr AS machineCostInr,
+              cost_inr AS costInr,
               display_order AS displayOrder
          FROM marketing_workout_process_costs
         WHERE workout_id = ? AND active_flag = 'Y'
@@ -114,6 +117,8 @@ async function getWorkoutSubparts(connection, workoutId) {
       `SELECT workout_subpart_process_cost_id AS workoutSubpartProcessCostId,
               process_type AS processType,
               process_description AS description,
+              total_cycle_time_seconds AS totalCycleTimeSeconds,
+              machine_cost_inr AS machineCostInr,
               cost_inr AS costInr,
               display_order AS displayOrder
          FROM marketing_workout_subpart_process_costs
@@ -125,9 +130,9 @@ async function getWorkoutSubparts(connection, workoutId) {
   }));
 }
 
-export async function upsertWorkout(connection, part, workoutNo, data, totals, userCode, saveStatus) {
+export async function upsertWorkout(connection, part, workoutNo, data, totals, userCode, saveStatus, masterConnection = connection) {
   const requestedProcessPlanId = Number(data.processPlanId || 0);
-  const [processPlans] = part.part_id ? await connection.execute(`SELECT process_plan_id AS processPlanId
+  const [processPlans] = part.part_id ? await masterConnection.execute(`SELECT process_plan_id AS processPlanId
     FROM part_process_plan WHERE part_id=? AND active_flag='Y'
       AND (?=0 OR process_plan_id=?)
     ORDER BY (process_plan_id=?) DESC,is_default DESC,(plan_status='APPROVED') DESC,process_plan_id
@@ -163,6 +168,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
     additionalMaterialCost: totals.additionalMaterialCost,
     assemblyLabourCost: totals.assemblyLabour,
     materialCost: totals.materialCost,
+    actualMaterialCost: totals.actualMaterialCost,
     materialCostForeign: totals.materialCostForeign,
     turning: totals.legacy.TURNING,
     vmc: totals.legacy.VMC,
@@ -187,6 +193,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
     specialTool: totals.specialTool,
     gauge: totals.gauge,
     trial: totals.trial,
+    sampleCostPercent: totals.sampleCostPercent,
     sample: totals.sample,
     totalDevelopment: totals.totalDevelopment,
     totalDevelopmentForeign: totals.totalDevelopmentForeign,
@@ -202,7 +209,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
        commission_percent, payment_terms, development_time, pilot_batch_delivery,
        item_code, machining_drawing_number, revision_number, description,
        annual_quantity, required_quantity_snapshot, moq, material, weight_kg,
-       material_rate_per_kg, additional_material_cost_inr, assembly_labour_cost_inr, material_cost_inr,
+       material_rate_per_kg, additional_material_cost_inr, assembly_labour_cost_inr, material_cost_inr, actual_material_cost_inr,
        material_cost_foreign, turning_cost_inr, vmc_cost_inr,
        keyway_spline_cost_inr, heat_treatment_cost_inr, shaping_gear_cost_inr,
        packing_forwarding_cost_inr, total_machining_cost_inr,
@@ -214,7 +221,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
        commission_amount_inr, commission_amount_foreign,
        final_part_price_fob_inr, final_part_price_fob_foreign,
        pattern_cost_inr, fixture_cost_inr, special_tool_cost_inr,
-       gauge_cost_inr, trial_cost_inr, sample_cost_inr, total_development_cost_inr,
+       gauge_cost_inr, trial_cost_inr, sample_cost_percent, sample_cost_inr, total_development_cost_inr,
        total_development_cost_foreign, save_status, active_flag, created_by, updated_by
      ) VALUES (
        :workoutNo, :enquiryId, :enquiryPartId, :processPlanId, :workoutDate, :referenceNo,
@@ -223,7 +230,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
        :commissionPercent, :paymentTerms, :developmentTime, :pilotBatchDelivery,
        :itemCode, :drawingNumber, :revisionNumber, :description,
        :annualQuantity, :requiredQuantity, :moq, :material, :weightKg,
-       :materialRate, :additionalMaterialCost, :assemblyLabourCost, :materialCost, :materialCostForeign,
+       :materialRate, :additionalMaterialCost, :assemblyLabourCost, :materialCost, :actualMaterialCost, :materialCostForeign,
        :turning, :vmc, :keywaySpline, :heatTreatment, :shapingGear,
        :packing, :totalMachining, :overheadAmount, :profitAmount,
        :adjustedMachining, :adjustedMachiningForeign,
@@ -231,7 +238,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
        :packingForeign, :partPriceBeforeCommission, :partPriceBeforeCommissionForeign,
        :commissionAmountInr, :commissionAmountForeign,
        :finalPartPriceInr, :finalPartPriceForeign,
-       :pattern, :fixture, :specialTool, :gauge, :trial, :sample,
+       :pattern, :fixture, :specialTool, :gauge, :trial, :sampleCostPercent, :sample,
        :totalDevelopment, :totalDevelopmentForeign, :saveStatus, 'Y', :userCode, :userCode
      ) ON DUPLICATE KEY UPDATE
        process_plan_id=VALUES(process_plan_id), workout_date=VALUES(workout_date), currency_code=VALUES(currency_code),
@@ -244,7 +251,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
        weight_kg=VALUES(weight_kg), material_rate_per_kg=VALUES(material_rate_per_kg),
        additional_material_cost_inr=VALUES(additional_material_cost_inr),
        assembly_labour_cost_inr=VALUES(assembly_labour_cost_inr),
-       material_cost_inr=VALUES(material_cost_inr), material_cost_foreign=VALUES(material_cost_foreign),
+       material_cost_inr=VALUES(material_cost_inr), actual_material_cost_inr=VALUES(actual_material_cost_inr), material_cost_foreign=VALUES(material_cost_foreign),
        turning_cost_inr=VALUES(turning_cost_inr), vmc_cost_inr=VALUES(vmc_cost_inr),
        keyway_spline_cost_inr=VALUES(keyway_spline_cost_inr),
        heat_treatment_cost_inr=VALUES(heat_treatment_cost_inr), shaping_gear_cost_inr=VALUES(shaping_gear_cost_inr),
@@ -264,7 +271,7 @@ export async function upsertWorkout(connection, part, workoutNo, data, totals, u
        final_part_price_fob_foreign=VALUES(final_part_price_fob_foreign),
        pattern_cost_inr=VALUES(pattern_cost_inr), fixture_cost_inr=VALUES(fixture_cost_inr),
        special_tool_cost_inr=VALUES(special_tool_cost_inr), gauge_cost_inr=VALUES(gauge_cost_inr),
-       trial_cost_inr=VALUES(trial_cost_inr), sample_cost_inr=VALUES(sample_cost_inr), total_development_cost_inr=VALUES(total_development_cost_inr),
+       trial_cost_inr=VALUES(trial_cost_inr), sample_cost_percent=VALUES(sample_cost_percent), sample_cost_inr=VALUES(sample_cost_inr), total_development_cost_inr=VALUES(total_development_cost_inr),
        total_development_cost_foreign=VALUES(total_development_cost_foreign),
        save_status=VALUES(save_status), updated_by=VALUES(updated_by)`,
     values
@@ -286,9 +293,9 @@ export async function replaceProcessCosts(connection, enquiryPartId, processCost
     const line = processCosts[index];
     await connection.execute(
       `INSERT INTO marketing_workout_process_costs
-       (workout_id, process_type, process_description, cost_inr, display_order, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, line.processType, line.description || null, line.costInr, index + 1, userCode]
+       (workout_id, process_type, process_description, total_cycle_time_seconds, machine_cost_inr, cost_inr, display_order, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, line.processType, line.description || null, line.totalCycleTimeSeconds, line.machineCostInr, line.costInr, index + 1, userCode]
     );
   }
 }
@@ -335,12 +342,15 @@ export async function replaceSubparts(connection, enquiryPartId, subparts, userC
       await connection.execute(
         `INSERT INTO marketing_workout_subpart_process_costs (
            workout_subpart_id, process_type, process_description,
-           cost_inr, display_order, active_flag, created_by
-         ) VALUES (?, ?, ?, ?, ?, 'Y', ?)`,
+           total_cycle_time_seconds, machine_cost_inr, cost_inr,
+           display_order, active_flag, created_by
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Y', ?)`,
         [
           result.insertId,
           process.processType,
           process.description,
+          process.totalCycleTimeSeconds,
+          process.machineCostInr,
           process.costInr,
           processIndex + 1,
           userCode,

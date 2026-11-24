@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiMessage } from "../api/client";
 import { referenceApi, type ReferenceData } from "../api/reference.api";
 
-const empty: ReferenceData = { references: [], materials: [], uoms: [], grades: [] };
+const empty: ReferenceData = { references: [], materials: [], uoms: [], grades: [], departments: [] };
 
 export function useReferenceData(types: string[]) {
   const key = types.join(",");

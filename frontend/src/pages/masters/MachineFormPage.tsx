@@ -1,12 +1,14 @@
 import DateInput from "../../components/DateInput";
 import { useUnsavedChanges } from "../../components/UnsavedChanges";
-import { ArrowLeft, Cog, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Cog, Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { apiMessage } from "../../api/client";
+import { locationMasterApi, type LocationMasterRow } from "../../api/locationMaster.api";
 import { machineApi } from "../../api/machine.api";
 import Alert from "../../components/Alert";
 import { useAppFeedback } from "../../components/AppFeedback";
+import { useReferenceData } from "../../hooks/useReferenceData";
 import "./CustomerFormPage.css";
 import "./MachineFormPage.css";
 
@@ -22,10 +24,14 @@ const blankUnit = (): UnitRow => ({ machineCode:"",serialNumber:"",installationD
 export default function MachineFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const machineMasterId = Number(id || 0);
   const isEdit = machineMasterId > 0;
+  const isReadOnly = isEdit && searchParams.get("mode") === "view";
   const { confirmDelete, showSuccess } = useAppFeedback();
+  const referenceData = useReferenceData([]);
   const [items,setItems] = useState<MachineItem[]>([]);
+  const [locations,setLocations] = useState<LocationMasterRow[]>([]);
   const [unitStatuses,setUnitStatuses] = useState<StatusOption[]>([]);
   const [itemSearch,setItemSearch] = useState("");
   const [itemId,setItemId] = useState("");
@@ -37,14 +43,16 @@ export default function MachineFormPage() {
   const [saving,setSaving] = useState(false);
   const [error,setError] = useState("");
 
-  const unsaved = useUnsavedChanges({itemId,otherSpecification,hourlyCostInr,machineStatus,units});
+  const unsaved = useUnsavedChanges({itemId,otherSpecification,hourlyCostInr,machineStatus,units}, undefined, !isReadOnly);
 
   useEffect(() => {
-    const requests:Promise<any>[]=[machineApi.lookups()];
-    if (isEdit) requests.push(machineApi.getById(machineMasterId));
-    Promise.all(requests).then(([lookupResponse,detailResponse]) => {
+    Promise.all([
+      machineApi.lookups(),
+      locationMasterApi.list({ status:"Y", pageSize:100 }),
+      isEdit ? machineApi.getById(machineMasterId) : Promise.resolve(null),
+    ]).then(([lookupResponse,locationResponse,detailResponse]) => {
       const eligibleItems=lookupResponse?.data?.items ?? [];
-      setItems(eligibleItems); setUnitStatuses(lookupResponse?.data?.unitStatuses ?? []);
+      setItems(eligibleItems); setLocations(locationResponse?.data ?? []); setUnitStatuses(lookupResponse?.data?.unitStatuses ?? []);
       const data=detailResponse?.data;
       if (!data) return;
       setItemId(String(data.itemId));
@@ -69,6 +77,7 @@ export default function MachineFormPage() {
   const save=async(event:FormEvent) => {
     const savedSnapshot = unsaved.snapshot();
  event.preventDefault();
+    if (isReadOnly) return;
     if (!itemId || !selectedItem) { setError("Select a machine from Item Master."); return; }
     if (!Number.isFinite(Number(hourlyCostInr)) || Number(hourlyCostInr) < 0) { setError("Machine Type hourly cost must be zero or greater."); return; }
     if (units.some((unit) => !unit.machineCode.trim())) { setError("Machine ID is required for every machine unit."); return; }
@@ -89,10 +98,11 @@ export default function MachineFormPage() {
 
   if (loading) return <div className="page-container"><div className="master-table-message">Loading Machine Master...</div></div>;
   return <div className="page-container master-form-page customer-form-compact">
-    <section className="master-form-page-header"><div className="master-form-title-group"><Cog size={22}/><h1>{isEdit ? "Edit Machine" : "Create Machine"}</h1></div>
-      <div className="master-form-actions"><button type="button" className="customer-cancel-link" onClick={() => navigate("/masters/machines")}><ArrowLeft size={15}/>Cancel</button><button type="submit" form="machine-master-form" className="primary-action-button" disabled={saving}><Save size={17}/>{saving ? "Saving..." : isEdit ? "Update Machine" : "Create Machine"}</button></div></section>
+    <section className="master-form-page-header"><div className="master-form-title-group"><Cog size={22}/><h1>{isReadOnly ? "View Machine" : isEdit ? "Edit Machine" : "Create Machine"}</h1></div>
+      <div className="master-form-actions"><button type="button" className="customer-cancel-link" onClick={() => navigate("/masters/machines")}><ArrowLeft size={15}/>{isReadOnly ? "Back" : "Cancel"}</button>{isReadOnly ? <button type="button" className="primary-action-button" onClick={() => navigate(`/masters/machines/${machineMasterId}?mode=edit`)}><Pencil size={17}/>Edit Machine</button> : <button type="submit" form="machine-master-form" className="primary-action-button" disabled={saving}><Save size={17}/>{saving ? "Saving..." : isEdit ? "Update Machine" : "Create Machine"}</button>}</div></section>
     {error && <Alert type="error" message={error}/>} 
     <form id="machine-master-form" className="master-entry-form" onSubmit={save}>
+      <fieldset className="master-read-only-fields" disabled={isReadOnly}>
       <section className="master-form-section"><div className="master-section-header"><div><h2>Item Master Machine</h2><p>Select a CA / Machines &amp; Equipment item. Model details are fetched automatically.</p></div></div><div className="master-form-grid">
         <label className="master-field span-2"><span>Item Code / Machine Name<b>*</b></span><input list="machine-item-options" value={itemSearch} disabled={isEdit} onChange={(event) => selectItem(event.target.value)} placeholder="Search item code or machine name"/><datalist id="machine-item-options">{selectableItems.map((item) => <option key={item.itemId} value={`${item.itemCode} - ${item.machineName}`}/>)}</datalist></label>
         <label className="master-field"><span>Machine Type</span><input className="readonly" readOnly value={selectedItem ? `${selectedItem.machineTypeCode} - ${selectedItem.machineTypeName}` : ""}/></label>
@@ -106,8 +116,9 @@ export default function MachineFormPage() {
         <label className="master-field span-2"><span>Other Specification</span><textarea value={otherSpecification} onChange={(event) => setOtherSpecification(event.target.value)} placeholder="Machine Master-specific information not covered in Item Master"/></label>
       </div></section>
       <section className="master-form-section"><div className="master-section-header between"><div><h2>Machine Unit Details</h2><p>Maintain one row for every physical machine. No. of Machines is calculated from these rows.</p></div><button type="button" className="marketing-add-line-button" onClick={() => setUnits((rows) => [...rows,blankUnit()])}><Plus size={16}/>Add Machine Unit</button></div>
-        <div className="machine-unit-table-wrapper"><table className="machine-unit-table"><thead><tr><th>#</th><th>Machine ID *</th><th>Serial Number</th><th>Installation Date</th><th>Plant / Location</th><th>Department</th><th>Status</th><th>Remarks</th><th>Action</th></tr></thead><tbody>{units.map((unit,index) => <tr key={unit.machineUnitId ?? `new-${index}`}><td>{index+1}</td><td><input value={unit.machineCode} onChange={(event) => updateUnit(index,"machineCode",event.target.value)} placeholder="VMC-01"/></td><td><input value={unit.serialNumber} onChange={(event) => updateUnit(index,"serialNumber",event.target.value)}/></td><td><DateInput type="date" value={unit.installationDate} onChange={(event) => updateUnit(index,"installationDate",event.target.value)}/></td><td><input value={unit.plantLocation} onChange={(event) => updateUnit(index,"plantLocation",event.target.value)}/></td><td><input value={unit.departmentName} onChange={(event) => updateUnit(index,"departmentName",event.target.value)}/></td><td><select value={unit.unitStatus} onChange={(event) => updateUnit(index,"unitStatus",event.target.value)}>{unitStatuses.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></td><td><input value={unit.remarks} onChange={(event) => updateUnit(index,"remarks",event.target.value)}/></td><td><button type="button" className="marketing-delete-line-button" disabled={units.length===1} onClick={() => void removeUnit(index)}><Trash2 size={16}/></button></td></tr>)}</tbody></table></div>
+        <div className="machine-unit-table-wrapper"><table className="machine-unit-table"><thead><tr><th>#</th><th>Machine ID *</th><th>Serial Number</th><th>Installation Date</th><th>Plant / Location</th><th>Department</th><th>Status</th><th>Remarks</th><th>Action</th></tr></thead><tbody>{units.map((unit,index) => <tr key={unit.machineUnitId ?? `new-${index}`}><td>{index+1}</td><td><input value={unit.machineCode} onChange={(event) => updateUnit(index,"machineCode",event.target.value)} placeholder="VMC-01"/></td><td><input value={unit.serialNumber} onChange={(event) => updateUnit(index,"serialNumber",event.target.value)}/></td><td><DateInput type="date" value={unit.installationDate} onChange={(event) => updateUnit(index,"installationDate",event.target.value)}/></td><td><select value={unit.plantLocation} onChange={(event) => updateUnit(index,"plantLocation",event.target.value)}><option value="">Select location</option>{unit.plantLocation && !locations.some((location) => location.locationName === unit.plantLocation) && <option value={unit.plantLocation}>Existing location: {unit.plantLocation}</option>}{locations.map((location) => <option key={location.locationMasterId} value={location.locationName}>{location.locationName}</option>)}</select></td><td><select value={unit.departmentName} onChange={(event) => updateUnit(index,"departmentName",event.target.value)}><option value="">Select department</option>{unit.departmentName && !referenceData.departments.some((department) => department.departmentName === unit.departmentName) && <option value={unit.departmentName}>Existing: {unit.departmentName}</option>}{referenceData.departments.map((department) => <option key={department.departmentCode} value={department.departmentName}>{department.departmentName}</option>)}</select></td><td><select value={unit.unitStatus} onChange={(event) => updateUnit(index,"unitStatus",event.target.value)}>{unitStatuses.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></td><td><input value={unit.remarks} onChange={(event) => updateUnit(index,"remarks",event.target.value)}/></td><td><button type="button" className="marketing-delete-line-button" disabled={units.length===1} onClick={() => void removeUnit(index)}><Trash2 size={16}/></button></td></tr>)}</tbody></table></div>
       </section>
+      </fieldset>
     </form>
   </div>;
 }

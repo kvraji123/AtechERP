@@ -3,7 +3,7 @@ import { api } from "./client";
 export const marketingApi = {
   dashboardSummary: () =>
     api.get("/marketing/enquiries/dashboard-summary").then((response) => response.data),
-  list: (params = {}) =>
+  list: (params: { activeFlag?: "Y" | "N"; search?: string; page?: number; pageSize?: number; filters?: string } = {}) =>
     api
       .get("/marketing/enquiries", { params })
       .then((response) => response.data),
@@ -32,6 +32,17 @@ export const marketingApi = {
     api
       .put(`/marketing/enquiries/${enquiryId}`, body)
       .then((response) => response.data),
+
+  deleteEnquiry: (enquiryId: number) =>
+    api
+      .delete(`/marketing/enquiries/${enquiryId}`)
+      .then((response) => response.data),
+
+  hardDeleteEnquiry: (enquiryId: number) =>
+    api
+      .delete(`/marketing/enquiries/${enquiryId}/hard`)
+      .then((response) => response.data),
+
 
   changeEnquiryStatus: (
     enquiryId: number,
@@ -141,6 +152,14 @@ export const marketingApi = {
   generateQuotationPdf: (enquiryId: number) =>
     api
       .post(`/marketing/enquiries/${enquiryId}/quotation/pdf`)
+      .then((response) => response.data),
+
+    sendQuotationEmail: (
+    enquiryId: number,
+    body: { to: string; subject: string; body: string }
+  ) =>
+    api
+      .post(`/marketing/enquiries/${enquiryId}/quotation/email`, body)
       .then((response) => response.data),
 
 };

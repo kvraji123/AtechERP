@@ -23,7 +23,6 @@ type FeasibilityForm = {
   communicationAddress: string;
   contactPerson: string;
   telephoneNumber: string;
-  faxNumber: string;
   emailAddress: string;
   isNewCustomer: Answer;
   existingProductsDetails: string;
@@ -67,7 +66,6 @@ const emptyForm = (): FeasibilityForm => ({
   communicationAddress: "",
   contactPerson: "",
   telephoneNumber: "",
-  faxNumber: "",
   emailAddress: "",
   isNewCustomer: "",
   existingProductsDetails: "",
@@ -111,7 +109,6 @@ const fieldMap: Record<keyof FeasibilityForm, string> = {
   communicationAddress: "communication_address",
   contactPerson: "contact_person",
   telephoneNumber: "telephone_number",
-  faxNumber: "fax_number",
   emailAddress: "email_address",
   isNewCustomer: "is_new_customer",
   existingProductsDetails: "existing_products_details",
@@ -187,7 +184,7 @@ export default function FeasibilityPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
-  const { showSuccess } = useAppFeedback();
+  const { confirmAction, showSuccess } = useAppFeedback();
   const canEditAllStages = hasPermission(
     user,
     Permissions.editEnquiryAllStages
@@ -260,7 +257,6 @@ export default function FeasibilityPage() {
         mapped.communicationAddress = data.part.billing_address || data.part.delivery_address || "";
         mapped.contactPerson = data.part.contact_person_name || "";
         mapped.telephoneNumber = data.part.phone_number || data.part.mobile_number || "";
-        mapped.faxNumber = data.part.fax_number || "";
         mapped.emailAddress = data.part.email_address || "";
       }
       setForm(mapped);
@@ -370,10 +366,11 @@ export default function FeasibilityPage() {
   const handleRegretAction = async (
     action: "GENERATE" | "PREVIEW" | "APPROVE" | "SENT"
   ) => {
-    if (
-      action === "APPROVE" &&
-      !window.confirm("Approve this regret letter? It cannot be regenerated after approval.")
-    ) return;
+    if (action === "APPROVE" && !await confirmAction({
+      title: "Approve Regret Letter?",
+      message: "This regret letter cannot be regenerated after approval.",
+      confirmLabel: "Approve Letter",
+    })) return;
     try {
       setRegretAction(action);
       setMessage(undefined);
@@ -415,8 +412,10 @@ export default function FeasibilityPage() {
       <PageHeader
         eyebrow="MARKETING / FEASIBILITY"
         title={part ? `Feasibility Review - ${part.doc_no}` : "Feasibility Review"}
+        onClose={cancel}
+        closeDisabled={loading || saving !== null}
+        closeLabel="Close Feasibility"
         actions={<>
-          <button className="secondary-action-button" type="button" onClick={cancel}><X size={16} />Cancel</button>
           {(savedDraft || persistedClosed) && !draftEditing && canEditAllStages ? (
             <button className="primary-action-button" type="button" disabled={loading} onClick={() => setDraftEditing(true)}><Pencil size={16} />{persistedClosed ? "Edit Feasibility" : "Edit Draft"}</button>
           ) : !viewRequested && (!persistedClosed || draftEditing) ? (
@@ -443,9 +442,8 @@ export default function FeasibilityPage() {
           <label><span>1. Enquiry Reference Number</span><input value={part?.doc_no ?? ""} readOnly /></label>
           <label><span>2. Customer Name</span><input value={part?.customer_name_snapshot ?? ""} readOnly /></label>
           <label className="wide"><span>3. Address for Communication</span><textarea rows={2} maxLength={1000} value={form.communicationAddress} disabled={closed} onChange={(e) => set("communicationAddress", e.target.value)} /></label>
-          <label><span>4. Contact Person</span><input maxLength={200} value={form.contactPerson} disabled={closed} onChange={(e) => set("contactPerson", e.target.value)} /></label>
-          <label><span>5. Telephone</span><input maxLength={50} value={form.telephoneNumber} disabled={closed} onChange={(e) => set("telephoneNumber", e.target.value)} /></label>
-          <label><span>Fax</span><input maxLength={50} value={form.faxNumber} disabled={closed} onChange={(e) => set("faxNumber", e.target.value)} /></label>
+          <label><span>4. Company Representative</span><input maxLength={200} value={form.contactPerson} disabled={closed} onChange={(e) => set("contactPerson", e.target.value)} /></label>
+          <label><span>5. Contact Number</span><input maxLength={50} value={form.telephoneNumber} disabled={closed} onChange={(e) => set("telephoneNumber", e.target.value)} /></label>
           <label><span>E-mail</span><input type="email" maxLength={200} value={form.emailAddress} disabled={closed} onChange={(e) => set("emailAddress", e.target.value)} /></label>
           <label className="wide"><span>6. Product Name</span><input value={part?.product_description ?? ""} readOnly /></label>
           <label><span>7. Material and Grade</span><input value={part?.material_and_grade ?? ""} readOnly /></label>
@@ -471,7 +469,7 @@ export default function FeasibilityPage() {
         <div className="feasibility-review-list">
           <ReviewRow number="16" label="What are the applicable statutory requirements?">{textArea("statutoryRequirements")}</ReviewRow>
           <ReviewRow number="17" label="Is there a customer-specified packing method / labelling requirement?"><YesNo value={combinedAnswer(form.customerSpecifiedPacking, form.customerSpecifiedLabelling, true)} disabled={closed} onChange={(v) => setCombined("customerSpecifiedPacking", "customerSpecifiedLabelling", v)} /></ReviewRow>
-          <ReviewRow number="18" label="Who pays the freight?"><div className="feasibility-radio-group">{[["BY_COMPANY", "By Company"], ["BY_CUSTOMER", "By Customer"], ["NOT_APPLICABLE", "Not Applicable"]].map(([value, label]) => <label key={value}><input type="radio" checked={form.freightPaidBy === value} disabled={closed} onChange={() => set("freightPaidBy", value)} />{label}</label>)}</div></ReviewRow>
+          <ReviewRow number="18" label="Who pays the freight?"><div className="feasibility-radio-group">{[["BY_COMPANY", "By Company"], ["BY_CUSTOMER", "By Customer"]].map(([value, label]) => <label key={value}><input type="radio" checked={form.freightPaidBy === value} disabled={closed} onChange={() => set("freightPaidBy", value)} />{label}</label>)}</div></ReviewRow>
           <ReviewRow number="19" label="What are the payment terms?"><div className="feasibility-payment-terms"><input role="combobox" aria-expanded={paymentTermsOpen && !closed} aria-controls="feasibility-payment-options" aria-autocomplete="list" maxLength={1000} value={form.paymentTerms} disabled={closed} placeholder="Search or enter payment terms" onFocus={() => { setPaymentTermsSearch(""); setPaymentTermsOpen(true); }} onBlur={() => setPaymentTermsOpen(false)} onChange={(e) => { set("paymentTerms", e.target.value); setPaymentTermsSearch(e.target.value); setPaymentTermsOpen(true); }} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); movePaymentTerm(1); } if (event.key === "ArrowUp") { event.preventDefault(); movePaymentTerm(-1); } }} />{paymentTermsOpen && !closed && filteredPaymentTerms.length > 0 && <div id="feasibility-payment-options" className="feasibility-payment-options" role="listbox">{filteredPaymentTerms.map((option: any) => <button key={option.value} type="button" role="option" aria-selected={form.paymentTerms === option.value} onMouseDown={(event) => event.preventDefault()} onClick={() => { set("paymentTerms", option.value); setPaymentTermsSearch(""); setPaymentTermsOpen(false); }}>{option.label || option.value}</button>)}</div>}</div></ReviewRow>
         </div>
       </section>

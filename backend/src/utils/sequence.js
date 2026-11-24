@@ -77,3 +77,42 @@ export async function getNextDocumentNumber(
 
   return [sequence.prefix, financialYear, paddedNumber].join("/");
 }
+
+// Use this for identifiers that are a single, permanent running serial rather
+// than a financial-year document number (for example, a Drawing Code).
+export async function getNextRunningSerial(
+  connection,
+  sequenceKey,
+  sequenceScope = "GLOBAL"
+) {
+  const [rows] = await connection.execute(
+    `
+      SELECT current_number
+      FROM app_document_sequences
+      WHERE sequence_key = ?
+        AND financial_year = ?
+      FOR UPDATE
+    `,
+    [sequenceKey, sequenceScope]
+  );
+
+  if (!rows.length) {
+    throw new AppError(
+      `Document sequence not configured for ${sequenceKey} / ${sequenceScope}.`,
+      500
+    );
+  }
+
+  const nextNumber = Number(rows[0].current_number) + 1;
+  await connection.execute(
+    `
+      UPDATE app_document_sequences
+      SET current_number = ?
+      WHERE sequence_key = ?
+        AND financial_year = ?
+    `,
+    [nextNumber, sequenceKey, sequenceScope]
+  );
+
+  return String(nextNumber);
+}

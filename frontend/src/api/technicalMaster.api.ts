@@ -1,6 +1,6 @@
 import { api } from "./client";
 
-export type TechnicalMasterKind = "operations"|"instruments"|"tolerance-grades"|"rejection-reasons"|"rejection-dispositions";
+export type TechnicalMasterKind = "operations"|"instruments"|"departments"|"tolerance-grades"|"inspection-characteristics"|"inspection-frequencies"|"rejection-reasons"|"rejection-dispositions";
 export type OperationSourceOption = { sourceCode:string; sourceName:string;
   costingMode:"INHOUSE"|"OUTSOURCE"; displayOrder:number; activeFlag:"Y"|"N" };
 

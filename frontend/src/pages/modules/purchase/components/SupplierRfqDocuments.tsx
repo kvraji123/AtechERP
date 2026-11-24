@@ -38,7 +38,7 @@ export default function SupplierRfqDocuments({ documents, details, onGenerate, o
               <h3 title={document.supplierName}>{document.supplierName}</h3>
               <small>{document.supplierCode} · {document.itemCount} {document.itemCount === 1 ? "item" : "items"}</small>
               <dl>
-                <dt>RFQ No.</dt><dd>{document.status === "NOT_GENERATED" ? "Pending" : document.rfqNumber}</dd>
+                <dt>RFQ / Purchase Enquiry No.</dt><dd>{document.status === "NOT_GENERATED" ? "Pending" : document.rfqNumber}</dd>
                 <dt>Status</dt><dd className={document.status === "NOT_GENERATED" ? "pending" : "ready"}>{document.status === "NOT_GENERATED" ? <Clock3 size={13} /> : <CheckCircle2 size={13} />}{document.status === "NOT_GENERATED" ? "Not generated" : document.status === "GENERATED" ? "Generated" : "Sent"}</dd>
                 <dt>Quotation</dt><dd>{document.quotationName || (document.status === "SENT" ? "Awaiting response" : "Not received")}</dd>
               </dl>

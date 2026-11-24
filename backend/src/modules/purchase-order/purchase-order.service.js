@@ -99,14 +99,7 @@ export async function generate(data, user) {
         const assignment = supplierAssignments[index]; const line = lineById.get(Number(assignment.purchase_request_item_id));
         const quantity = Number(assignment.assigned_quantity); const rate = Number(assignment.unit_price ?? line.masterPurchaseRate ?? 0); const taxPercent = Number(assignment.tax_percent ?? line.tax_percent ?? 0); const amounts = calculateLineAmounts({ quantity, unitPrice: rate, discount: assignment.discount_amount, taxPercent, freight: assignment.freight_amount, packing: assignment.packing_amount, otherCharges: assignment.other_charges_amount });
         subtotal += amounts.basicAmount - amounts.discountAmount; discount += amounts.discountAmount; tax += amounts.taxAmount; packing += amounts.packingAmount; freight += amounts.freightAmount; other += amounts.otherChargesAmount; grandTotal += amounts.lineTotalAmount;
-        await repository.upsertItemSupplierRate(connection, {
-          itemId: line.item_id,
-          supplierId,
-          purchaseRate: rate,
-          currencyCode: assignment.currency_code || assignment.currencyCode || supplier.currencyCode || "INR",
-          leadTimeDays: assignment.delivery_lead_days ?? assignment.deliveryLeadDays ?? null,
-        }, user.userCode);
-        const poItemId = await repository.insertItem(connection, [user.tenantId, orderId, line.purchase_request_item_id, index + 1, line.item_id, line.itemCode || "", line.item_type_name, line.item_description, line.item_specification, line.uom_code, line.hsn_code, quantity, rate, amounts.discountAmount, taxPercent, amounts.taxAmount, amounts.packingAmount, amounts.freightAmount, amounts.otherChargesAmount, amounts.lineTotalAmount, assignment.delivery_date || line.requestRequiredDate, "OPEN"]);
+        const poItemId = await repository.insertItem(connection, [user.tenantId, orderId, line.purchase_request_item_id, index + 1, line.item_id, line.itemCode || "", line.item_type_name, line.item_description, line.item_specification, null, line.uom_code, line.hsn_code, quantity, rate, amounts.discountAmount, taxPercent, amounts.taxAmount, amounts.packingAmount, amounts.freightAmount, amounts.otherChargesAmount, amounts.lineTotalAmount, assignment.delivery_date || line.requestRequiredDate, "OPEN"]);
         await repository.insertSource(connection, [user.tenantId, orderId, poItemId, line.requestId, line.purchase_request_item_id, quantity]);
       }
       await connection.execute(`UPDATE purchase_orders SET subtotal_amount=?,discount_amount=?,tax_amount=?,packing_amount=?,freight_amount=?,other_charges_amount=?,grand_total_amount=? WHERE purchase_order_id=? AND tenant_id=?`, [subtotal, discount, tax, packing, freight, other, grandTotal, orderId, user.tenantId]);
@@ -130,7 +123,7 @@ export async function update(id, data, user) {
     for (const input of lines) {
       const current = byId.get(Number(input.purchaseOrderItemId ?? input.id)); if (!current) throw new AppError("PO item does not belong to this order.", 409);
       const amounts = calculateLineAmounts({ quantity: input.quantity, unitPrice: input.rate, discount: input.discount, taxPercent: input.taxPercent, freight: input.freight, packing: input.packing, otherCharges: input.otherCharges }); subtotal += amounts.basicAmount - amounts.discountAmount; discount += amounts.discountAmount; tax += amounts.taxAmount; packing += amounts.packingAmount; freight += amounts.freightAmount; other += amounts.otherChargesAmount; grandTotal += amounts.lineTotalAmount;
-      await repository.updateItem(connection, current.purchase_order_item_id, user.tenantId, [input.quantity, input.rate, amounts.discountAmount, input.taxPercent, amounts.taxAmount, amounts.packingAmount, amounts.freightAmount, amounts.otherChargesAmount, amounts.lineTotalAmount]);
+      await repository.updateItem(connection, current.purchase_order_item_id, user.tenantId, [input.quantity, input.rate, amounts.discountAmount, input.taxPercent, amounts.taxAmount, amounts.packingAmount, amounts.freightAmount, amounts.otherChargesAmount, amounts.lineTotalAmount, input.otherSpecification]);
     }
     await connection.execute(`UPDATE purchase_orders SET subtotal_amount=?,discount_amount=?,tax_amount=?,packing_amount=?,freight_amount=?,other_charges_amount=?,grand_total_amount=?,updated_by=? WHERE purchase_order_id=? AND tenant_id=?`, [subtotal, discount, tax, packing, freight, other, grandTotal, user.userCode, id, user.tenantId]);
     await recordAudit({ connection, tenantId: user.tenantId, module: "PURCHASE", entityType: "PURCHASE_ORDER", entityId: id, action: "PO_DRAFT_UPDATED", performedBy: user.userCode });

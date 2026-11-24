@@ -1,14 +1,14 @@
 import "./MarketingListPage.css";
 
-import { Download, Eye, Filter, Pencil, Plus, Search, X } from "lucide-react";
+import { Download, Eye, Filter, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import * as XLSX from "xlsx";
 
 import { apiMessage } from "../../../api/client";
 import { marketingApi } from "../../../api/marketing.api";
 import Alert from "../../../components/Alert";
+import { useAppFeedback } from "../../../components/AppFeedback";
 import Pagination, { PAGE_SIZE } from "../../../components/Pagination";
 import { useAuth } from "../../../context/AuthContext";
 import {
@@ -111,12 +111,19 @@ const filterColumns: Array<{ key: FilterKey; label: string }> = [
 export default function MarketingListPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { confirmDelete, showSuccess } = useAppFeedback();
+  const currentRole = user?.roleName || "";
+  const isAdministrator = String(currentRole)
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_") === "ADMINISTRATOR";
   const canEditEnquiries = hasPermission(
     user,
     Permissions.editEnquiryAllStages
   );
   const [rows, setRows] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -144,6 +151,7 @@ export default function MarketingListPage() {
         search: requestedSearch,
         page: requestedPage,
         pageSize: PAGE_SIZE,
+        activeFlag: showInactive ? "N" : "Y",
         ...(Object.keys(activeFilters).length > 0 ? { filters: JSON.stringify(activeFilters) } : {}),
       });
       setRows(response.data || []);
@@ -153,7 +161,7 @@ export default function MarketingListPage() {
     }
   };
 
-  useEffect(() => { void load(page); }, [page, selectedFilters]);
+  useEffect(() => { void load(page); }, [page, selectedFilters, showInactive]);
 
   useEffect(() => {
     let active = true;
@@ -348,6 +356,7 @@ export default function MarketingListPage() {
       );
       const request = {
         search,
+        activeFlag: showInactive ? "N" as const : "Y" as const,
         ...(Object.keys(activeFilters).length > 0 ? { filters: JSON.stringify(activeFilters) } : {}),
       };
       const exportedRows: any[] = [];
@@ -365,6 +374,7 @@ export default function MarketingListPage() {
         requestedPage += 1;
       } while (exportedRows.length < exportTotal);
 
+      const XLSX = await import("xlsx");
       const data = exportedRows.map((row) => ({
         "Doc No.": row.docNo || "",
         "Customer Name": row.customerName || "",
@@ -415,6 +425,55 @@ export default function MarketingListPage() {
       : current.filter((value) => !visibleValues.includes(value)));
   };
 
+  const removeEnquiry = async (row: any) => {
+    const confirmed = await confirmDelete({
+      title: "Delete Enquiry?",
+      message: `${row.docNo} will be removed from the active enquiry list. Existing history and related documents will be retained.`,
+      confirmLabel: "Delete Enquiry",
+    });
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      await marketingApi.deleteEnquiry(Number(row.enquiryId));
+      setRows((current) => current.filter((item) => Number(item.enquiryId) !== Number(row.enquiryId)));
+      setSearchSuggestions((current) => current.filter((item) => Number(item.enquiryId) !== Number(row.enquiryId)));
+      setTotal((current) => Math.max(0, current - 1));
+      showSuccess("Enquiry deleted successfully.");
+
+      if (rows.length === 1 && page > 1) {
+        setPage((current) => Math.max(1, current - 1));
+      }
+    } catch (deleteError) {
+      setError(apiMessage(deleteError));
+    }
+  };
+
+  const hardDeleteInactiveEnquiry = async (row: any) => {
+    const confirmed = await confirmDelete({
+      title: "Permanently delete inactive enquiry?",
+      message: `${row.docNo} and its enquiry workflow, quotation and feasibility records, and stored enquiry documents will be permanently removed. This cannot be undone. Operationally linked records may block deletion.`,
+      confirmLabel: "Permanently Delete",
+    });
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      const response = await marketingApi.hardDeleteEnquiry(Number(row.enquiryId));
+      setRows((current) => current.filter((item) => Number(item.enquiryId) !== Number(row.enquiryId)));
+      setTotal((current) => Math.max(0, current - 1));
+      setSearchSuggestions((current) => current.filter((item) => Number(item.enquiryId) !== Number(row.enquiryId)));
+      if (String(response?.message || "").includes("some stored files could not be removed")) {
+        setError(response.message);
+      } else {
+        showSuccess(response?.message || "Inactive enquiry permanently deleted.");
+      }
+      if (rows.length === 1 && page > 1) setPage((current) => Math.max(1, current - 1));
+    } catch (deleteError) {
+      setError(apiMessage(deleteError));
+    }
+  };
+
   const columnHeader = (key: FilterKey, label: string, className = "") => {
     const filterCount = selectedFilters[key]?.length || 0;
     return <th className={className}>
@@ -434,7 +493,6 @@ export default function MarketingListPage() {
           }}
         >
           <Filter size={13} />
-          {filterCount > 0 && <span className="marketing-column-filter-count">{filterCount}</span>}
         </button>
       </span>
     </th>;
@@ -465,6 +523,14 @@ export default function MarketingListPage() {
             <p>{total} records found</p>
           </div>
           <div className="marketing-list-tools">
+          {isAdministrator && <button
+            type="button"
+            className="secondary-action-button"
+            aria-pressed={showInactive}
+            onClick={() => { setPage(1); setShowInactive((current) => !current); }}
+          >
+            {showInactive ? "Show active enquiries" : "Show inactive enquiries"}
+          </button>}
           <form
             className="marketing-list-search"
             onSubmit={(event) => {
@@ -544,19 +610,15 @@ export default function MarketingListPage() {
               {rows.map((row) => (
                 <tr
                   key={row.enquiryId}
-                  onDoubleClick={() =>
-                    navigate(enquiryDestination(row))
-                  }
+                  onDoubleClick={() => row.activeFlag !== "N" && navigate(enquiryDestination(row))}
                 >
                   <td>
-                    <button
-                      className="marketing-enquiry-link"
-                      onClick={() =>
-                        navigate(enquiryDestination(row))
-                      }
-                    >
-                      {row.docNo}
-                    </button>
+                    {row.activeFlag === "N" ? <span>{row.docNo}</span> : <button
+                        className="marketing-enquiry-link"
+                        onClick={() => navigate(enquiryDestination(row))}
+                      >
+                        {row.docNo}
+                      </button>}
                   </td>
                   <td className="marketing-customer-cell">
                     <strong>{row.customerName}</strong>
@@ -571,11 +633,9 @@ export default function MarketingListPage() {
                   </td>
                   <td>
                     <span
-                      className={`marketing-badge status ${statusClass(
-                        row.enquiryStatus
-                      )}`}
+                      className={`marketing-badge status ${row.activeFlag === "N" ? "inactive" : statusClass(row.enquiryStatus)}`}
                     >
-                      {statusLabel(row.enquiryStatus)}
+                      {row.activeFlag === "N" ? "Inactive" : statusLabel(row.enquiryStatus)}
                     </span>
                   </td>
                   <td className="marketing-parts-cell">
@@ -608,7 +668,7 @@ export default function MarketingListPage() {
                   <td className="app-last-updated-column">{formatListDateTime(row.lastUpdated)}</td>
                   <td className="marketing-actions-column">
                     <div className="marketing-row-actions">
-                      <button
+                      {row.activeFlag !== "N" && <button
                         type="button"
                         className="marketing-icon-action"
                         title="View enquiry"
@@ -618,8 +678,8 @@ export default function MarketingListPage() {
                         }
                       >
                         <Eye size={16} />
-                      </button>
-                      {canEditEnquiries && (
+                      </button>}
+                      {row.activeFlag !== "N" && canEditEnquiries && (
                         <button
                         type="button"
                         className="marketing-icon-action"
@@ -631,6 +691,27 @@ export default function MarketingListPage() {
                       >
                         <Pencil size={16} />
                       </button>
+                      )}
+                      {isAdministrator && row.activeFlag === "N" ? (
+                        <button
+                          type="button"
+                          className="marketing-icon-action"
+                          title="Permanently delete inactive enquiry"
+                          aria-label={`Permanently delete ${row.docNo}`}
+                          onClick={() => void hardDeleteInactiveEnquiry(row)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      ) : isAdministrator && (
+                        <button
+                          type="button"
+                          className="marketing-icon-action"
+                          title="Delete enquiry"
+                          aria-label={`Delete enquiry ${row.docNo}`}
+                          onClick={() => void removeEnquiry(row)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       )}
                     </div>
                   </td>

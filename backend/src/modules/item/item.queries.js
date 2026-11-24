@@ -14,8 +14,19 @@ export const LIST_ITEMS = `
     I.material_grade_id AS materialGradeId,
     MG.grade_code AS materialGradeCode,
     MG.grade_name AS materialName,
+    I.mtc_applicable AS mtcApplicable,
     I.inspection_required AS inspectionRequired,
+    I.hsn_code AS hsnCode,
+    I.tax_percent AS taxPercent,
     I.purchase_rate AS purchaseRate,
+    (
+      SELECT ISU.purchase_rate
+      FROM item_supplier ISU
+      WHERE ISU.item_id = I.item_id
+        AND ISU.supplier_id = ?
+      ORDER BY ISU.preferred_supplier DESC, ISU.item_supplier_id DESC
+      LIMIT 1
+    ) AS supplierPurchaseRate,
     I.minimum_stock AS minimumStock,
     I.make_name AS makeName,
     I.model_name AS modelName,

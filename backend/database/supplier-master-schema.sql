@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS supplier_master (
   supplier_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   supplier_code VARCHAR(50) NOT NULL,
   supplier_type VARCHAR(100) NULL,
-  supplier_name VARCHAR(200) NOT NULL,
+  supplier_category VARCHAR(50) NULL,
+  supplier_name VARCHAR(200) NULL,
   supplier_short_name VARCHAR(100) NULL,
   plant_code VARCHAR(50) NULL,
   billing_address TEXT NULL,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS supplier_master (
   ifsc_code VARCHAR(30) NULL,
   pan_tan_number VARCHAR(30) NULL,
   supplier_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
   deactivation_remarks VARCHAR(500) NULL,
   other_legal_requirements TEXT NULL,
@@ -44,7 +46,8 @@ CREATE TABLE IF NOT EXISTS supplier_master (
   PRIMARY KEY (supplier_id),
   UNIQUE KEY uq_supplier_code (supplier_code),
   KEY ix_supplier_name (supplier_name),
-  KEY ix_supplier_active (active_flag)
+  KEY ix_supplier_active (active_flag),
+  KEY ix_supplier_category_active (supplier_category, active_flag)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO app_document_sequences (sequence_key,financial_year,prefix,current_number,number_padding)

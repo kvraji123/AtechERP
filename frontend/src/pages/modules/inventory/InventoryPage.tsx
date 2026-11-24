@@ -1,5 +1,4 @@
 import { BadgeCheck, FileText, Handshake, RefreshCw, ShieldAlert, Truck } from "lucide-react";
-import InventoryLocations from "./InventoryLocations";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiMessage } from "../../../api/client";
@@ -15,8 +14,8 @@ import "./InventoryPage.css";
 type InventoryRow = Record<string, unknown>;
 type ValidationErrors = Record<string, string>;
 type PageKind = "dashboard" | "stock" | "transactions" | "quality-hold" | "rejection-inventory" | "reorder-alerts";
-type DashboardDestination = "/inventory/stock" | "/inventory/quality-hold" | "/inventory/rejection-inventory" | "/inventory/outsourcing-wip" | "/inventory/customer-material" | "/inventory/reorder-alerts" | "/inventory/transactions";
-type DashboardTone = "stock" | "quality-hold" | "rejection-inventory" | "outsourcing-wip" | "customer-material" | "reorder-alerts" | "transactions";
+type DashboardDestination = "/inventory/stock" | "/inventory/quality-hold" | "/inventory/rejection-inventory" | "/inventory/outsourcing-wip" | "/inventory/customer-material" | "/inventory/reorder-alerts" | "/inventory/transactions" | "/inventory/control";
+type DashboardTone = "stock" | "quality-hold" | "rejection-inventory" | "outsourcing-wip" | "customer-material" | "reorder-alerts" | "transactions" | "production-control";
 
 const pageByPath:Record<string,PageKind> = {
   "/inventory":"dashboard", "/inventory/stock":"stock", "/inventory/transactions":"transactions",
@@ -33,6 +32,7 @@ const dashboardToneByDestination:Record<DashboardDestination,DashboardTone> = {
   "/inventory/customer-material":"customer-material",
   "/inventory/reorder-alerts":"reorder-alerts",
   "/inventory/transactions":"transactions",
+  "/inventory/control":"production-control",
 };
 
 const numeric = (value:unknown) => Number(value || 0).toLocaleString("en-IN",{maximumFractionDigits:3});
@@ -196,20 +196,20 @@ export default function InventoryPage() {
     <header className="inventory-header"><h1>{title}</h1><button type="button" className="inventory-refresh" onClick={() => { void load(true); }}><RefreshCw size={17}/> Refresh</button></header>
     {grnFilter && <div className="inventory-grn-filter">Filtered to GRN <strong>{grnFilter}</strong><button type="button" onClick={() => navigate("/inventory/rejection-inventory")}>Clear filter</button></div>}
     {error && <div className="inventory-error">{error}</div>}
-    {(kind === "dashboard" || kind === "stock") && <InventoryLocations/>}
     {kind === "dashboard" ? <Dashboard dashboard={dashboard} loading={loading} onNavigate={navigate}/> : <><InventoryTable kind={kind} rows={rows} loading={loading} search={search} warehouse={warehouse} warehouses={warehouses} onSearch={setSearch} onWarehouse={setWarehouse} onSearchSubmit={() => { setPage(1); void load(false, search, warehouse, 1); }} onResolve={openResolve} onManageRtv={openRtv} onManageResolution={openResolutionWorkflow} pagination={<Pagination page={page} total={total} onPageChange={(nextPage) => { setPage(nextPage); void load(false, search, warehouse, nextPage); }} itemLabel="inventory records" disabled={loading}/>} />{resolving && <ResolutionPanel row={resolving} action={resolutionAction} quantity={resolutionQuantity} remarks={resolutionRemarks} actionReference={resolutionReference} warehouse={releaseWarehouse} binLocation={releaseBin} returnDate={returnDate} dispatchReference={dispatchReference} transportMode={transportMode} transportOptions={transportOptions} transportReference={transportReference} saving={savingResolution} errors={validationErrors} onAction={setResolutionAction} onQuantity={setResolutionQuantity} onRemarks={setResolutionRemarks} onActionReference={setResolutionReference} onWarehouse={setReleaseWarehouse} onBinLocation={setReleaseBin} onReturnDate={setReturnDate} onDispatchReference={setDispatchReference} onTransportMode={setTransportMode} onTransportReference={setTransportReference} onCancel={() => setResolving(null)} onSave={() => { void resolve(); }}/>} {rtvWorkflow && <RtvWorkflowPanel row={rtvWorkflow} approvalRemarks={approvalRemarks} supplierContact={supplierContact} acknowledgementReference={acknowledgementReference} saving={savingRtv} errors={validationErrors} onApprovalRemarks={setApprovalRemarks} onSupplierContact={setSupplierContact} onAcknowledgementReference={setAcknowledgementReference} onClose={() => setRtvWorkflow(null)} onApprove={() => { void processRtv("approve"); }} onAcknowledge={() => { void processRtv("acknowledge"); }} onDispatch={() => { void processRtv("dispatch"); }}/>} {resolutionWorkflow && <ResolutionWorkflowPanel row={resolutionWorkflow} approvalRemarks={workflowApprovalRemarks} partyContact={workflowPartyContact} acknowledgementReference={workflowAcknowledgementReference} executionReference={workflowExecutionReference} completionRemarks={workflowCompletionRemarks} reinspectionDecision={workflowReinspectionDecision} reinspectionAccepted={workflowReinspectionAccepted} reinspectionRejected={workflowReinspectionRejected} reinspectionRemarks={workflowReinspectionRemarks} reinspectionReason={workflowReinspectionReason} stockPostingDate={workflowStockPostingDate} stockWarehouse={workflowStockWarehouse} stockBin={workflowStockBin} stockBatch={workflowStockBatch} saving={savingWorkflow} errors={validationErrors} onApprovalRemarks={setWorkflowApprovalRemarks} onPartyContact={setWorkflowPartyContact} onAcknowledgementReference={setWorkflowAcknowledgementReference} onExecutionReference={setWorkflowExecutionReference} onCompletionRemarks={setWorkflowCompletionRemarks} onReinspectionDecision={selectReinspectionDecision} onReinspectionAccepted={setWorkflowReinspectionAccepted} onReinspectionRejected={setWorkflowReinspectionRejected} onReinspectionRemarks={setWorkflowReinspectionRemarks} onReinspectionReason={setWorkflowReinspectionReason} onStockPostingDate={setWorkflowStockPostingDate} onStockWarehouse={setWorkflowStockWarehouse} onStockBin={setWorkflowStockBin} onStockBatch={setWorkflowStockBatch} onClose={() => setResolutionWorkflow(null)} onApprove={() => { void processResolutionWorkflow("approve"); }} onAcknowledge={() => { void processResolutionWorkflow("acknowledge"); }} onExecute={() => { void processResolutionWorkflow("execute"); }} onCompleteRework={() => { void processResolutionWorkflow("complete-rework"); }} onReinspect={() => { void processResolutionWorkflow("reinspect"); }} onPostRework={() => { void processResolutionWorkflow("post-rework"); }}/>}</>}
   </main>;
 }
 
 function Dashboard({ dashboard,loading,onNavigate }: { dashboard:InventoryDashboard | null; loading:boolean; onNavigate:(to:string) => void }) {
   const cards:Array<{ label:string; value:string; detail:string; to:DashboardDestination }> = [
-    {label:"On-hand quantity",value:numeric(dashboard?.quantityOnHand),detail:`${numeric(dashboard?.itemCount)} stocked items · ${numeric(dashboard?.stockLineCount)} locations`,to:"/inventory/stock"},
+    {label:"On-hand quantity",value:numeric(dashboard?.quantityOnHand),detail:`${numeric(dashboard?.itemCount)} stocked items`,to:"/inventory/stock"},
     {label:"Quality hold",value:numeric(dashboard?.qualityHoldQuantity),detail:`${numeric(dashboard?.qualityHoldLineCount)} GRN line(s) pending disposition`,to:"/inventory/quality-hold"},
     {label:"Rejection inventory",value:numeric(dashboard?.rejectionInventoryQuantity),detail:`${numeric(dashboard?.rejectionInventoryLineCount)} segregated rejection line(s)`,to:"/inventory/rejection-inventory"},
     {label:"Outsourcing WIP",value:numeric(dashboard?.outsourcingWipQuantity),detail:`${numeric(dashboard?.outsourcingWipLineCount)} receipt line(s) awaiting the Process Plan operation`,to:"/inventory/outsourcing-wip"},
     {label:"Customer-owned stock",value:numeric(dashboard?.customerStockQuantity),detail:`${numeric(dashboard?.customerStockCustomerCount)} customer(s) · ${numeric(dashboard?.customerWipQuantity)} in WIP`,to:"/inventory/customer-material"},
     {label:"Reorder alerts",value:numeric(dashboard?.reorderAlertCount),detail:"Items at or below the Item Master reorder level",to:"/inventory/reorder-alerts"},
     {label:"Last movement",value:date(dashboard?.lastTransactionDate),detail:"Latest posted inventory transaction",to:"/inventory/transactions"},
+    {label:"Production control",value:"Open",detail:"Transfers, work-order issue, MTR / PRR and rejection disposition",to:"/inventory/control"},
   ];
   return <section className="inventory-dashboard"><div className="inventory-card-grid">{cards.map((card) => <button type="button" key={card.label} className={`inventory-card ${dashboardToneByDestination[card.to]}`} onClick={() => onNavigate(card.to)} disabled={loading}><span>{card.label}</span><strong>{loading ? "…" : card.value}</strong><small>{card.detail}</small></button>)}</div></section>;
 }

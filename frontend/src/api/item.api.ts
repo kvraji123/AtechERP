@@ -7,6 +7,7 @@ export type ItemListParams = {
   materialId?: number;
   uomId?: number;
   supplierId?: number;
+  rateSupplierId?: number;
   inspectionRequired?: "Y" | "N" | "";
   activeFlag?: "Y" | "N" | "";
   page?: number;
@@ -19,6 +20,11 @@ export const itemApi = {
   lookups: () => api.get("/items/lookups").then((response) => response.data),
   createCategory: (body: { itemGroupId: number; typeName: string; itemCodePrefix: string }) =>
     api.post("/items/categories", body).then((response) => response.data),
+  retireCategory: (itemTypeId: number) => api.delete(`/items/categories/${itemTypeId}`).then((response) => response.data),
+  addSpecificationOption: (body: { specFieldId: number; optionValue: string }) =>
+    api.post("/items/specification-options", body).then((response) => response.data),
+  retireSpecificationOption: (body: { specFieldId: number; optionValue: string }) =>
+    api.delete("/items/specification-options", { data: body }).then((response) => response.data),
   getById: (itemId: number) => api.get(`/items/${itemId}`).then((response) => response.data),
   create: (body: unknown) => api.post("/items", body).then((response) => response.data),
   bulkUpload: (formData: FormData) => api.post("/items/bulk-upload", formData).then((response) => response.data),

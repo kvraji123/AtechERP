@@ -21,14 +21,28 @@ const jsonArray = (value) => {
   try { const parsed=JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
 };
 const humanize = (value) => String(value || "").toLowerCase().replace(/(^|_)\w/g, (text) => text.replace("_", " ").toUpperCase());
-const withItemGroupPrefix = (groupCode, description) => {
-  const normalizedDescription = String(description || "").trim().replace(/\s+/g, " ");
-  const normalizedGroupCode = String(groupCode || "").trim().toUpperCase();
-  if (!normalizedDescription || !normalizedGroupCode) return normalizedDescription;
-  const prefix = `${normalizedGroupCode}-`;
-  if (normalizedDescription.toUpperCase() === prefix) return "";
-  const descriptionWithoutPrefix = normalizedDescription.replace(new RegExp(`^${prefix}\\s*`, "i"), "").trim();
-  return descriptionWithoutPrefix ? `${prefix}${descriptionWithoutPrefix}` : "";
+const compactDescriptionPart = (value) => String(value || "").trim()
+  .replace(/\s+/g, " ").replace(/_/g, "-").replace(/\|/g, "/");
+const normalizeSpecificationOption = (value) => String(value || "").trim().toUpperCase()
+  .replace(/\s+/g, "_");
+const matchesVisibleWhen = (field, submitted) => {
+  if (!field.visibleWhenField) return true;
+  const submittedValue = String(submitted.get(field.visibleWhenField)?.value || "").trim().toUpperCase();
+  return String(field.visibleWhenValue || "").split("|")
+    .some((value) => submittedValue === value.trim().toUpperCase());
+};
+const genericItemDescription = (references, fields = [], values = {}, otherSpecification = "") => {
+  const parts = [references.group_code, references.item_code_prefix || references.description_prefix,
+    references.material_short_code,
+    references.grade_code === "GENERAL" ? "" : references.grade_code];
+  for (const field of fields) {
+    const value = compactDescriptionPart(values[field.fieldCode]);
+    if (!value) continue;
+    const uom = String(values[`${field.fieldCode}Uom`] || "").trim();
+    parts.push(`${value}${uom ? compactDescriptionPart(uom).toUpperCase() : ""}`);
+  }
+  parts.push(otherSpecification);
+  return parts.map(compactDescriptionPart).filter(Boolean).join(" - ");
 };
 
 function normalizeItemCategory(data) {
@@ -51,6 +65,13 @@ function isRetiredPurchasedCategory(groupCode, typeName) {
     );
 }
 
+function isRetiredRawMaterialCategory(groupCode, typeName) {
+  return String(groupCode || "").toUpperCase() === "RM"
+    && ["ROUND BAR", "SQUARE BAR", "SQUARE ROD", "PROFILE", "TERMINAL", "POWDER", "EXTRUSION"].includes(
+      String(typeName || "").trim().toUpperCase()
+    );
+}
+
 function normalizeSuppliers(input) {
   const suppliers = Array.isArray(input) ? input.map((row) => ({
     supplierId: Number(row.supplierId),
@@ -59,7 +80,6 @@ function normalizeSuppliers(input) {
     currencyCode: clean(row.currencyCode) || "INR",
     moq: optionalNumber(row.moq, "Supplier MOQ"),
     leadTimeDays: optionalNumber(row.leadTimeDays, "Lead time", false),
-    effectiveFrom: clean(row.effectiveFrom), effectiveTo: clean(row.effectiveTo),
     preferredSupplier: row.preferredSupplier === true || row.preferredSupplier === "Y" ? "Y" : "N",
     remarks: clean(row.remarks),
   })) : [];
@@ -68,9 +88,6 @@ function normalizeSuppliers(input) {
   if (new Set(ids).size !== ids.length) throw new AppError("Duplicate suppliers are not allowed.");
   if (suppliers.filter((row) => row.preferredSupplier === "Y").length > 1) {
     throw new AppError("Only one preferred supplier is allowed.");
-  }
-  if (suppliers.some((row) => row.effectiveFrom && row.effectiveTo && row.effectiveTo < row.effectiveFrom)) {
-    throw new AppError("Supplier Effective To date cannot be before Effective From date.");
   }
   return suppliers;
 }
@@ -98,7 +115,7 @@ function normalizeInspectionPlanCharacteristics(input) {
   }) : [];
 }
 
-function normalizeItem(data) {
+function normalizeItem(data, { requireHsn = false } = {}) {
   const item = {
     itemGroupId: Number(data.itemGroupId), itemTypeId: Number(data.itemTypeId),
     customerId: data.customerId ? Number(data.customerId) : null,
@@ -108,9 +125,11 @@ function normalizeItem(data) {
     uomId: Number(data.uomId),
     materialGradeId: data.materialGradeId ? Number(data.materialGradeId) : null,
     materialId: null,
-    inspectionRequired: data.inspectionRequired === "Y" ? "Y" : "N",
+    mtcApplicable: data.mtcApplicable === "Y" ? "Y" : "N",
+    inspectionRequired: data.inspectionRequired === "N" ? "N" : "Y",
     inspectionPlanCharacteristics: normalizeInspectionPlanCharacteristics(data.inspectionPlanCharacteristics),
-    hsnCode: clean(data.hsnCode), purchaseRate: optionalNumber(data.purchaseRate, "Purchase rate"),
+    hsnCode: clean(data.hsnCode), taxPercent: optionalNumber(data.taxPercent, "Tax percentage") ?? 0,
+    purchaseRate: optionalNumber(data.purchaseRate, "Purchase rate"),
     minimumStock: optionalNumber(data.minimumStock, "Minimum stock"),
     makeName: clean(data.makeName), modelName: clean(data.modelName),
     machineTypeId: data.machineTypeId ? Number(data.machineTypeId) : null,
@@ -141,7 +160,6 @@ function normalizeItem(data) {
   };
   if (!item.itemGroupId) throw new AppError("Item Group is required.");
   if (!item.itemTypeId) throw new AppError("Item Category is required.");
-  if (!item.itemDescription && !item.specifications.length) throw new AppError("Item Description is required.");
   if (item.itemDescription && item.itemDescription.length > 250) throw new AppError("Item Description cannot exceed 250 characters.");
   if (!["ACTIVE", "INACTIVE", "OBSOLETE"].includes(item.itemStatus)) {
     throw new AppError("Item Status must be Active, Inactive or Obsolete.");
@@ -150,7 +168,9 @@ function normalizeItem(data) {
   if (data.materialGradeId && !item.materialGradeId) {
     throw new AppError("Select a valid Material & Grade.");
   }
+  if (requireHsn && !item.hsnCode) throw new AppError("HSN Code is required.");
   if (item.hsnCode && !/^\d+$/.test(item.hsnCode)) throw new AppError("HSN Code must contain digits only.");
+  if (item.taxPercent > 100) throw new AppError("Tax percentage cannot be more than 100.");
   if (item.maximumStock !== null && item.reorderLevel !== null && item.maximumStock < item.reorderLevel) {
     throw new AppError("Maximum stock cannot be less than reorder level.");
   }
@@ -211,30 +231,31 @@ async function validateInspectionPlanCharacteristics(connection, item) {
   });
 }
 
-async function applyConfiguredSpecifications(connection, item, references) {
+async function applyConfiguredSpecifications(connection, item, references, legacySpecifications = []) {
   const config=await repository.getSpecificationConfig(connection,item.itemTypeId);
   if (references.group_code === "PC" && !config.fields.some((field) => field.fieldCode === "size")) {
     throw new AppError("Size is not configured for this Packing Material category.");
   }
-  if (!config.fields.length) {
-    if (references.group_code === "PU") {
-      throw new AppError("Description fields are not configured for this Purchased Item category.");
-    }
-    return;
-  }
   if (references.group_code === "RM" && !item.materialGradeId) {
     throw new AppError("Material & Grade is required for Raw Material.");
   }
+  if (!config.fields.length) {
+    if (!item.itemDescription) {
+      item.itemDescription=genericItemDescription(references, [], {}, item.itemSpecification);
+    }
+    return;
+  }
   const submitted=new Map(item.specifications.map((row) => [row.fieldCode,row]));
+  const legacyValuesByField = new Map((legacySpecifications || []).map((row) => [
+    String(row.fieldCode || ""),
+    String(row.valueText ?? row.valueNumber ?? "").trim(),
+  ]));
   const uomIds=[...new Set(item.specifications.map((row) => row.uomId).filter(Boolean))];
   const uoms=await repository.getUomsByIds(connection,uomIds);
   const uomById=new Map(uoms.map((row) => [Number(row.uomId),row.uomCode]));
   const normalized=[];
   const values={};
-  const visibleFields=config.fields.filter((field) => {
-    if (!field.visibleWhenField) return true;
-    return String(submitted.get(field.visibleWhenField)?.value || "").toUpperCase() === String(field.visibleWhenValue || "").toUpperCase();
-  });
+  const visibleFields=config.fields.filter((field) => matchesVisibleWhen(field, submitted));
   for (const field of visibleFields) {
     const row=submitted.get(field.fieldCode);
     const value=String(row?.value || "").trim();
@@ -247,7 +268,8 @@ async function applyConfiguredSpecifications(connection, item, references) {
       if (!drawingCodes.length || activeDrawingCodes.length !== drawingCodes.length) {
         throw new AppError("Select valid active Drawing Code(s).");
       }
-    } else if (field.inputType === "SELECT" && !options.includes(value)) {
+    } else if (field.inputType === "SELECT" && !options.includes(value)
+      && legacyValuesByField.get(field.fieldCode) !== value) {
       throw new AppError(`Select a valid ${field.fieldLabel}.`);
     }
     let valueNumber=null;
@@ -260,7 +282,6 @@ async function applyConfiguredSpecifications(connection, item, references) {
     if (allowedUoms.length && (!uomCode || !allowedUoms.includes(uomCode))) throw new AppError(`Select a valid UOM for ${field.fieldLabel}.`);
     values[field.fieldCode]=value;
     values[`${field.fieldCode}Uom`]=String(uomCode || "").toLowerCase();
-    values[`${field.fieldCode}Label`]=humanize(value);
     normalized.push({ specFieldId:Number(field.specFieldId),fieldCode:field.fieldCode,
       valueText:field.inputType === "NUMBER" ? null : value,valueNumber,uomId:row?.uomId || null });
   }
@@ -273,24 +294,14 @@ async function applyConfiguredSpecifications(connection, item, references) {
   item.specifications=normalized;
   if (references.group_code === "PC") {
     if (!values.size) throw new AppError("Size is required for Packing Materials.");
-    item.itemDescription = `${references.type_name} - ${values.size}`;
+    if (!item.itemDescription) item.itemDescription = genericItemDescription(
+      references, visibleFields, values, item.itemSpecification
+    );
     return;
   }
-  if (!["RM", "TL", "PU"].includes(references.group_code)) return;
-  const template=config.templates.find((row) => row.conditionOperator === "EQUALS" &&
-      String(values[row.conditionFieldCode] || "").toUpperCase() === String(row.conditionValue || "").toUpperCase())
-    || config.templates.find((row) => row.conditionOperator === "PRESENT" && values[row.conditionFieldCode])
-    || config.templates.find((row) => row.conditionOperator === "DEFAULT");
-  if (!template) throw new AppError("Description template is not configured for the selected specification.");
-  const context={...values,optionalLength:values.length ? ` × ${values.length} ${values.lengthUom}` : "",materialShort:references.material_short_code || references.material_name || "",
-    material:references.material_name || "",grade:references.grade_code === "GENERAL" ? "" : (references.grade_name || references.grade_code || ""),
-    gradeOrMaterial:references.grade_code === "GENERAL" ? references.material_name : (references.grade_name || references.grade_code || references.material_name),
-    itemType:references.type_name || ""};
-  const generatedDescription=template.templateText.replace(/\{([A-Za-z0-9_]+)\}/g,(_match,key) => context[key] ?? "")
-    .replace(/\s+/g," ").replace(/\s+([×–])/g," $1").replace(/([Ø])\s+/g,"$1").trim();
-  item.itemDescription=["RM", "PU"].includes(references.group_code)
-    ? withItemGroupPrefix(references.group_code, generatedDescription)
-    : generatedDescription;
+  if (!item.itemDescription) item.itemDescription = genericItemDescription(
+    references, visibleFields, values, item.itemSpecification
+  );
   if (!item.itemDescription) throw new AppError("Complete the fields required to generate the Item Description.");
   item.specifications=normalized;
 }
@@ -308,15 +319,24 @@ export async function getItem(itemId) {
 }
 
 async function validateReferences(connection, item, {
-  allowLegacyPurchasedCategory = false,
+  allowLegacyItemCategory = false,
+  legacySpecifications = [],
 } = {}) {
-  const references = await repository.validateReferences(connection, item);
+  const references = await repository.validateReferences(connection, item, {
+    allowInactiveItemType: allowLegacyItemCategory,
+  });
   if (!references) throw new AppError("Select a valid active Item Group, Item Category, UOM and Material & Grade.");
   if (
     isRetiredPurchasedCategory(references.group_code, references.type_name)
-    && !allowLegacyPurchasedCategory
+    && !allowLegacyItemCategory
   ) {
     throw new AppError("Select a specific Purchased Item category instead of Purchased Items.");
+  }
+  if (
+    isRetiredRawMaterialCategory(references.group_code, references.type_name)
+    && !allowLegacyItemCategory
+  ) {
+    throw new AppError("Select an active Raw Material category.");
   }
   if (["RM", "CS"].includes(references.group_code)) {
     if (!item.materialGradeId || !references.material_id) {
@@ -332,7 +352,8 @@ async function validateReferences(connection, item, {
     references.material_name = null;
     references.material_short_code = null;
   }
-  await applyConfiguredSpecifications(connection,item,references);
+  if (references.group_code !== "RM") item.mtcApplicable = "N";
+  await applyConfiguredSpecifications(connection,item,references,legacySpecifications);
   if (!item.itemDescription) throw new AppError("Item Description is required.");
   if (item.itemDescription.length > 250) throw new AppError("Item Description cannot exceed 250 characters.");
   if (references.group_code === "CS") {
@@ -389,6 +410,10 @@ async function validateReferences(connection, item, {
   } else if (item.calibrationRequired === "Y" && !item.calibrationFrequency) {
     throw new AppError("Calibration Frequency is required when calibration is applicable.");
   }
+  if (references.group_code === "IG" && item.calibrationAgencyId
+    && !(await repository.validateSupplierCategory(connection, item.calibrationAgencyId, "CALIBRATION"))) {
+    throw new AppError("Select an active supplier categorized for Calibration as the Calibration Agency.");
+  }
   if (references.group_code !== "CM") {
     item.shelfLifeApplicable = "N";
     item.shelfLifeDays = null;
@@ -403,7 +428,7 @@ async function validateReferences(connection, item, {
 }
 
 export async function createItem(data, userCode) {
-  const item = normalizeItem(data);
+  const item = normalizeItem(data, { requireHsn: true });
   return withTransaction(async (connection) => {
     await validateReferences(connection, item);
     await validateInspectionPlanCharacteristics(connection, item);
@@ -426,6 +451,9 @@ export async function createItemCategory(data, userCode) {
     if (isRetiredPurchasedCategory(group.groupCode, category.typeName)) {
       throw new AppError("Purchased Items is retired. Add a specific category such as Fasteners, Plugs or Springs.");
     }
+    if (isRetiredRawMaterialCategory(group.groupCode, category.typeName)) {
+      throw new AppError("This Raw Material category is retired and cannot be added.");
+    }
     const duplicate = await repository.findItemCategory(
       connection,
       category.itemGroupId,
@@ -443,6 +471,55 @@ export async function createItemCategory(data, userCode) {
   });
 }
 
+export async function retireItemCategory(itemTypeId, userCode) {
+  return withTransaction(async (connection) => {
+    const category = await repository.getItemCategory(connection, Number(itemTypeId));
+    if (!category) throw new AppError("Item Category not found.", 404);
+    if (!(await repository.deactivateItemCategory(connection, itemTypeId, userCode))) {
+      throw new AppError("Item Category is already retired.", 409);
+    }
+    return category;
+  });
+}
+
+export async function addSpecificationOption(data) {
+  const specFieldId = Number(data.specFieldId);
+  const optionValue = normalizeSpecificationOption(data.optionValue);
+  if (!specFieldId) throw new AppError("Select a valid specification field.");
+  if (!optionValue || optionValue.length > 120 || !/^[A-Z0-9][A-Z0-9_./-]*$/.test(optionValue)) {
+    throw new AppError("Enter an option using letters, numbers, spaces, hyphens, slashes or periods.");
+  }
+  return withTransaction(async (connection) => {
+    const field = await repository.getSpecificationOptionFieldForUpdate(connection, specFieldId);
+    if (!field || field.inputType !== "SELECT") throw new AppError("This is not a configurable list-of-values field.", 400);
+    const options = jsonArray(field.optionValues).map((value) => String(value));
+    if (options.some((value) => value.toUpperCase() === optionValue)) {
+      throw new AppError("This option already exists.", 409);
+    }
+    const nextOptions = [...options, optionValue];
+    await repository.updateSpecificationOptionValues(connection, specFieldId, nextOptions);
+    return { specFieldId, fieldLabel: field.fieldLabel, optionValues: nextOptions };
+  });
+}
+
+export async function retireSpecificationOption(data) {
+  const specFieldId = Number(data.specFieldId);
+  const optionValue = normalizeSpecificationOption(data.optionValue);
+  if (!specFieldId || !optionValue) throw new AppError("Select a valid list-of-values option.");
+  return withTransaction(async (connection) => {
+    const field = await repository.getSpecificationOptionFieldForUpdate(connection, specFieldId);
+    if (!field || field.inputType !== "SELECT") throw new AppError("This is not a configurable list-of-values field.", 400);
+    const options = jsonArray(field.optionValues).map((value) => String(value));
+    const nextOptions = options.filter((value) => value.toUpperCase() !== optionValue);
+    if (nextOptions.length === options.length) throw new AppError("This option is already retired.", 409);
+    if (field.requiredFlag === "Y" && nextOptions.length === 0) {
+      throw new AppError(`Keep at least one option for required field ${field.fieldLabel}.`);
+    }
+    await repository.updateSpecificationOptionValues(connection, specFieldId, nextOptions);
+    return { specFieldId, fieldLabel: field.fieldLabel, optionValues: nextOptions };
+  });
+}
+
 export async function updateItem(itemId, data, userCode) {
   const item = normalizeItem(data);
   return withTransaction(async (connection) => {
@@ -452,8 +529,9 @@ export async function updateItem(itemId, data, userCode) {
       throw new AppError("Item Group cannot be changed after the Item Code is generated.");
     }
     await validateReferences(connection, item, {
-      allowLegacyPurchasedCategory:
+      allowLegacyItemCategory:
         Number(existing.item_type_id) === item.itemTypeId,
+      legacySpecifications: existing.specifications,
     });
     await validateInspectionPlanCharacteristics(connection, item);
     await repository.updateItem(connection, Number(itemId), item, userCode);
@@ -663,6 +741,7 @@ function requireBlankWhenNotApplicable(row, aliases, label) {
 function validateApplicableMainColumns(row, group, category) {
   if (group.groupCode !== "RM") {
     requireBlankWhenNotApplicable(row, ["Material & Grade (Raw Material only)", "Material & Grade"], "Material & Grade");
+    requireBlankWhenNotApplicable(row, ["MTC Applicable?", "MTC Applicable", "MTC"], "MTC Applicable");
   }
   if (group.groupCode !== "CM") {
     requireBlankWhenNotApplicable(row, ["Shelf Life Applicable?", "Shelf Life", "Shelf Life Days"], "Shelf Life");
@@ -778,7 +857,8 @@ function mapBulkRow(row, lookups) {
     additionalDescription: readCell(row, ["Additional Description"]),
     uomId: Number(uom.uomId), materialGradeId: materialGrade ? Number(materialGrade.materialGradeId) : null,
     itemStatus: mapStatus(readCell(row, ["Item Status (blank = Active)", "Item Status"])),
-    inspectionRequired: mapYesNo(readCell(row, ["Inspection Required?", "Inspection Required"]), "Inspection Required"),
+    mtcApplicable: mapYesNo(readCell(row, ["MTC Applicable?", "MTC Applicable", "MTC"]), "MTC Applicable"),
+    inspectionRequired: mapYesNo(readCell(row, ["Inspection Required?", "Inspection Required"]), "Inspection Required", "Y"),
     hsnCode: readCell(row, ["HSN Code"]),
     purchaseRate: readCell(row, ["Default Purchase Rate (INR)", "Default Purchase Rate"]),
     minimumStock: readCell(row, ["Minimum Stock"]),
@@ -821,7 +901,7 @@ export async function bulkUploadItems(file, userCode) {
       if (itemInput.inspectionRequired !== "Y" && inspectionPlanCharacteristics.length) {
         throw new AppError("Inspection-plan rows are allowed only when Inspection Required is Yes.");
       }
-      const item = normalizeItem({ ...itemInput, inspectionPlanCharacteristics });
+      const item = normalizeItem({ ...itemInput, inspectionPlanCharacteristics }, { requireHsn: true });
       await withTransaction(async (connection) => {
         await validateReferences(connection, item);
         await validateInspectionPlanCharacteristics(connection, item);

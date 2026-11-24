@@ -1,12 +1,15 @@
 import type { PurchaseOrderApprovalRecord } from "./purchaseFlowStore";
 
 export type GateEntryStatus = "DRAFT" | "GATE_ENTERED" | "GRN_CREATED" | "OUTSOURCING_WIP" | "STOCK_POSTED";
-export type GateEntryType = "REGULAR_PURCHASE" | "CUSTOMER_PURCHASE" | "OPEN_PURCHASE" | "OUTSOURCING_PARTS";
+export type GateEntryListFilter = "ALL" | GateEntryStatus | "PENDING_GRN";
+export type GateEntryType = "REGULAR_PURCHASE" | "CUSTOMER_PURCHASE" | "OPEN_PURCHASE" | "OUTSOURCING_PARTS" | "OTHER_SERVICES";
+export type GateServiceType = "CALIBRATION_RETURN" | "TOOL_RETURN";
 
 export type GateEntryRecord = {
   id: string;
   gateEntryNumber: string;
   entryType?: GateEntryType;
+  serviceType?: GateServiceType | null;
   referenceNumber?: string;
   poNumber: string;
   poId: string;
@@ -21,6 +24,8 @@ export type GateEntryRecord = {
   customerId?: number | null;
   customerName?: string;
   transportMode?: string;
+  courierName?: string;
+  courierReceiptNumber?: string;
   entryDateTime: string;
   lastUpdatedAt?: string | null;
   vehicleNumber: string;

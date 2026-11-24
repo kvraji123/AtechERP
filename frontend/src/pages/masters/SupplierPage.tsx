@@ -1,9 +1,9 @@
 import {
   Building2,
-  Eye,
   Pencil,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 
 import {
@@ -15,6 +15,8 @@ import { useNavigate } from "react-router-dom";
 import { supplierApi } from "../../api/supplier.api";
 import { apiMessage } from "../../api/client";
 import { useReferenceData } from "../../hooks/useReferenceData";
+import { useAppFeedback } from "../../components/AppFeedback";
+import { useAuth } from "../../context/AuthContext";
 import Pagination, { PAGE_SIZE } from "../../components/Pagination";
 import "./CustomerPage.css";
 type SupplierRow = {
@@ -22,16 +24,28 @@ type SupplierRow = {
   supplierCode: string;
   supplierName: string;
   supplierType: string;
+  supplierCategory: string;
   city: string;
   state: string;
   mobileNumber: string;
   email: string;
-  supplierStatus: "ACTIVE" | "INACTIVE";
+  supplierStatus: "ACTIVE" | "INACTIVE" | "DRAFT";
 };
+
+const displaySupplierValue = (value: string) => value
+  .replace(/_/g, " ")
+  .toLowerCase()
+  .replace(/\b\w/g, (character) => character.toUpperCase());
 
 export default function SupplierPage() {
   const referenceData = useReferenceData(["RECORD_STATUS"]);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { confirmDelete, showSuccess } = useAppFeedback();
+  const isAdministrator = String(user?.roleName || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_") === "ADMINISTRATOR";
 
   const [suppliers, setSuppliers] = useState<
     SupplierRow[]
@@ -54,6 +68,8 @@ export default function SupplierPage() {
           pageSize: PAGE_SIZE,
           search,
           activeFlag: status === "ACTIVE" ? "Y" : status === "INACTIVE" ? "N" : "",
+          saveStatus: status === "DRAFT" ? "DRAFT" : status ? "SUBMITTED" : "",
+          includeDraft: true,
         });
         const rows = response?.data ?? [];
         setTotal(Number(response?.meta?.total || 0));
@@ -64,11 +80,12 @@ export default function SupplierPage() {
             supplierCode: row.supplierCode ?? "",
             supplierName: row.supplierName ?? "",
             supplierType: row.supplierType ?? "",
+            supplierCategory: row.supplierCategory ?? "",
             city: row.city ?? "",
             state: row.stateName ?? "",
             mobileNumber: row.mobileNumber ?? "",
             email: row.emailAddress ?? "",
-            supplierStatus: row.supplierStatus ??
+            supplierStatus: row.saveStatus === "DRAFT" ? "DRAFT" : row.supplierStatus ??
               (row.activeFlag === "N" ? "INACTIVE" : "ACTIVE"),
           }))
         );
@@ -81,6 +98,42 @@ export default function SupplierPage() {
 
     void loadSuppliers();
   }, [page, search, status]);
+
+  const remove = async (supplier: SupplierRow) => {
+    const confirmed = await confirmDelete({
+      title: "Delete Supplier?",
+      message: `${supplier.supplierName} will be deactivated and cannot be used in new transactions. Existing documents will be kept.`,
+      confirmLabel: "Deactivate Supplier",
+    });
+    if (!confirmed) return;
+    try {
+      setError("");
+      await supplierApi.changeStatus(supplier.supplierId, "INACTIVE");
+      setSuppliers((current) => current.filter((row) => row.supplierId !== supplier.supplierId));
+      setTotal((current) => Math.max(0, current - 1));
+      showSuccess("Supplier deactivated successfully.");
+    } catch (deleteError) {
+      setError(apiMessage(deleteError));
+    }
+  };
+
+  const hardDelete = async (supplier: SupplierRow) => {
+    const confirmed = await confirmDelete({
+      title: "Permanently delete supplier?",
+      message: `${supplier.supplierCode} · ${supplier.supplierName} will be permanently removed. This cannot be undone. If existing records refer to this supplier, deletion will be blocked.`,
+      confirmLabel: "Permanently Delete",
+    });
+    if (!confirmed) return;
+    try {
+      setError("");
+      await supplierApi.hardDelete(supplier.supplierId);
+      setSuppliers((current) => current.filter((row) => row.supplierId !== supplier.supplierId));
+      setTotal((current) => Math.max(0, current - 1));
+      showSuccess("Inactive supplier permanently deleted.");
+    } catch (deleteError) {
+      setError(apiMessage(deleteError));
+    }
+  };
 
   return (
     <div className="page-container master-list-page">
@@ -133,6 +186,8 @@ export default function SupplierPage() {
           >
             <option value="">All Status</option>
 
+            <option value="DRAFT">Draft</option>
+
             {referenceData.options("RECORD_STATUS").map((option) =>
               <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
@@ -147,6 +202,7 @@ export default function SupplierPage() {
                 <th>Supplier Code</th>
                 <th>Supplier Name</th>
                 <th>Supplier Type</th>
+                <th>Category / Process</th>
 
                 <th>City</th>
                 <th>State</th>
@@ -161,7 +217,7 @@ export default function SupplierPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <div className="master-table-message">
                       Loading suppliers...
                     </div>
@@ -169,7 +225,7 @@ export default function SupplierPage() {
                 </tr>
               ) : suppliers.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <div className="master-empty-state">
                       <div className="master-empty-icon">
                         <Building2 size={30} />
@@ -202,9 +258,10 @@ export default function SupplierPage() {
                   (supplier) => (
                     <tr key={supplier.supplierId}>
                       <td>
-                        <strong>
-                          {supplier.supplierCode}
-                        </strong>
+                        <div className="master-record-cell">
+                          <button type="button" className="master-record-edit" title="Edit supplier" aria-label={`Edit ${supplier.supplierCode}`} onClick={() => navigate(`/masters/suppliers/${supplier.supplierId}?mode=edit`)}><Pencil size={15} /></button>
+                          <button type="button" className="master-record-link" title="View supplier" onClick={() => navigate(`/masters/suppliers/${supplier.supplierId}?mode=view`)}>{supplier.supplierCode}</button>
+                        </div>
                       </td>
 
                       <td>
@@ -212,8 +269,10 @@ export default function SupplierPage() {
                       </td>
 
                       <td>
-                        {supplier.supplierType}
+                        {displaySupplierValue(supplier.supplierType)}
                       </td>
+
+                      <td>{supplier.supplierCategory ? displaySupplierValue(supplier.supplierCategory) : "—"}</td>
 
                       <td>{supplier.city}</td>
 
@@ -240,24 +299,12 @@ export default function SupplierPage() {
                         <div className="master-row-actions">
                           <button
                             type="button"
-                            title="View supplier"
-                            onClick={() =>
-                              navigate(`/masters/suppliers/${supplier.supplierId}`)
-                            }
+                            title={supplier.supplierStatus === "ACTIVE" ? "Deactivate supplier" : isAdministrator ? "Permanently delete inactive supplier" : "Only administrators can permanently delete inactive suppliers"}
+                            aria-label={supplier.supplierStatus === "ACTIVE" ? `Deactivate ${supplier.supplierCode}` : `Permanently delete ${supplier.supplierCode}`}
+                            disabled={supplier.supplierStatus !== "ACTIVE" && !isAdministrator}
+                            onClick={() => void (supplier.supplierStatus === "ACTIVE" ? remove(supplier) : hardDelete(supplier))}
                           >
-                            <Eye size={16} />
-                          </button>
-
-                          <button
-                            type="button"
-                            title="Edit supplier"
-                            onClick={() =>
-                              navigate(
-                                `/masters/suppliers/${supplier.supplierId}`
-                              )
-                            }
-                          >
-                            <Pencil size={16} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       </td>

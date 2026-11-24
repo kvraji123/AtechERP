@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS customer_master (
   party_type ENUM('CUSTOMER', 'SUPPLIER', 'BOTH') NOT NULL DEFAULT 'CUSTOMER',
   customer_code VARCHAR(50) NOT NULL,
   customer_type VARCHAR(100) NULL,
-  customer_name VARCHAR(200) NOT NULL,
+  customer_name VARCHAR(200) NULL,
   customer_short_name VARCHAR(100) NULL,
   plant_code VARCHAR(50) NULL,
   billing_address TEXT NULL,
@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS customer_master (
   ifsc_code VARCHAR(30) NULL,
   pan_tan_number VARCHAR(30) NULL,
   customer_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
   deactivation_remarks VARCHAR(500) NULL,
   other_legal_requirements TEXT NULL,
@@ -89,14 +90,17 @@ CREATE TABLE IF NOT EXISTS customer_master (
   PRIMARY KEY (customer_id),
   UNIQUE KEY uq_customer_code (customer_code),
   KEY ix_customer_name (customer_name),
-  KEY ix_customer_active (active_flag)
+  KEY ix_customer_active (active_flag),
+  KEY ix_customer_lookup_code (active_flag, party_type, customer_code),
+  KEY ix_customer_lookup_name (active_flag, party_type, customer_name),
+  KEY ix_customer_lookup_short_name (active_flag, party_type, customer_short_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS part_master (
   part_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  customer_id BIGINT UNSIGNED NOT NULL,
-  part_category ENUM('MACHINING', 'ASSEMBLY') NOT NULL,
-  part_name VARCHAR(200) NOT NULL,
+  customer_id BIGINT UNSIGNED NULL,
+  part_category ENUM('MACHINING', 'ASSEMBLY') NULL,
+  part_name VARCHAR(200) NULL,
   part_number VARCHAR(100) NOT NULL,
   drawing_number VARCHAR(100) NULL,
   drawing_revision_number VARCHAR(50) NULL,
@@ -106,8 +110,13 @@ CREATE TABLE IF NOT EXISTS part_master (
   material_specification VARCHAR(300) NULL,
   part_weight DECIMAL(14,3) NULL,
   unit_of_measurement VARCHAR(30) NULL,
-  part_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  part_status ENUM('ACTIVE', 'INACTIVE', 'DRAWING_UNDER_REVISION') NOT NULL DEFAULT 'ACTIVE',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
+  revision_source_part_id BIGINT UNSIGNED NULL,
+  bom_release_status ENUM('DRAFT', 'RELEASED', 'NOT_REQUIRED') NOT NULL DEFAULT 'NOT_REQUIRED',
+  bom_released_by VARCHAR(50) NULL,
+  bom_released_on DATETIME NULL,
   project_name VARCHAR(200) NULL,
   deactivation_remarks VARCHAR(500) NULL,
   created_by VARCHAR(50) NOT NULL,
@@ -119,8 +128,12 @@ CREATE TABLE IF NOT EXISTS part_master (
   KEY ix_part_customer (customer_id),
   KEY ix_part_name (part_name),
   KEY ix_part_active (active_flag),
+  KEY ix_part_revision_source (revision_source_part_id),
   CONSTRAINT fk_part_customer
     FOREIGN KEY (customer_id) REFERENCES customer_master (customer_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT,
+  CONSTRAINT fk_part_revision_source
+    FOREIGN KEY (revision_source_part_id) REFERENCES part_master (part_id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -142,7 +155,8 @@ CREATE TABLE IF NOT EXISTS supplier_master (
   supplier_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   supplier_code VARCHAR(50) NOT NULL,
   supplier_type VARCHAR(100) NULL,
-  supplier_name VARCHAR(200) NOT NULL,
+  supplier_category VARCHAR(50) NULL,
+  supplier_name VARCHAR(200) NULL,
   supplier_short_name VARCHAR(100) NULL,
   plant_code VARCHAR(50) NULL,
   billing_address TEXT NULL,
@@ -172,6 +186,7 @@ CREATE TABLE IF NOT EXISTS supplier_master (
   ifsc_code VARCHAR(30) NULL,
   pan_tan_number VARCHAR(30) NULL,
   supplier_status ENUM('ACTIVE', 'INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  save_status VARCHAR(20) NOT NULL DEFAULT 'SUBMITTED',
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
   deactivation_remarks VARCHAR(500) NULL,
   other_legal_requirements TEXT NULL,
@@ -184,7 +199,8 @@ CREATE TABLE IF NOT EXISTS supplier_master (
   PRIMARY KEY (supplier_id),
   UNIQUE KEY uq_supplier_code (supplier_code),
   KEY ix_supplier_name (supplier_name),
-  KEY ix_supplier_active (active_flag)
+  KEY ix_supplier_active (active_flag),
+  KEY ix_supplier_category_active (supplier_category, active_flag)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO app_document_sequences (sequence_key,financial_year,prefix,current_number,number_padding)
@@ -288,6 +304,7 @@ CREATE TABLE IF NOT EXISTS item_master (
   material_grade_id BIGINT UNSIGNED NULL,
   inspection_required ENUM('Y', 'N') NOT NULL DEFAULT 'N',
   hsn_code VARCHAR(20) NULL,
+  tax_percent DECIMAL(7,4) NOT NULL DEFAULT 0.0000,
   purchase_rate DECIMAL(18,2) NULL,
   minimum_stock DECIMAL(18,3) NULL,
   make_name VARCHAR(150) NULL,
@@ -370,6 +387,28 @@ CREATE TABLE IF NOT EXISTS item_supplier (
     REFERENCES item_master (item_id)
     ON UPDATE CASCADE ON DELETE CASCADE,
   CONSTRAINT fk_item_supplier_party FOREIGN KEY (supplier_id)
+    REFERENCES supplier_master (supplier_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_supplier_price_history (
+  item_supplier_price_history_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  previous_purchase_rate DECIMAL(18,2) NULL,
+  new_purchase_rate DECIMAL(18,2) NULL,
+  previous_currency_code VARCHAR(10) NULL,
+  new_currency_code VARCHAR(10) NULL,
+  change_type VARCHAR(30) NOT NULL,
+  effective_from DATE NULL,
+  changed_by VARCHAR(50) NOT NULL,
+  changed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_supplier_price_history_id),
+  KEY ix_item_supplier_price_history_item (item_id, supplier_id, changed_on),
+  CONSTRAINT fk_item_supplier_price_history_item FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_item_supplier_price_history_supplier FOREIGN KEY (supplier_id)
     REFERENCES supplier_master (supplier_id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -524,6 +563,53 @@ INSERT INTO material_master (material_name) VALUES
   ('Carbide'), ('High-Speed Steel'), ('Nylon'), ('Delrin'), ('Teflon'),
   ('Plastic'), ('Granite'), ('Spring Steel'), ('Iron'), ('Steel')
 ON DUPLICATE KEY UPDATE active_flag = 'Y';
+
+-- ============================================================================
+-- Supplier-specific Item Master purchase-rate history
+-- Source: item-supplier-price-history-migration.sql
+-- ============================================================================
+
+-- Supplier-specific Item Master purchase-rate history.
+-- Existing rates are retained as one BASELINE row; future Item Master saves add a row only when the rate or currency changes.
+
+CREATE TABLE IF NOT EXISTS item_supplier_price_history (
+  item_supplier_price_history_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  previous_purchase_rate DECIMAL(18,2) NULL,
+  new_purchase_rate DECIMAL(18,2) NULL,
+  previous_currency_code VARCHAR(10) NULL,
+  new_currency_code VARCHAR(10) NULL,
+  change_type VARCHAR(30) NOT NULL,
+  effective_from DATE NULL,
+  changed_by VARCHAR(50) NOT NULL,
+  changed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_supplier_price_history_id),
+  KEY ix_item_supplier_price_history_item (item_id, supplier_id, changed_on),
+  CONSTRAINT fk_item_supplier_price_history_item FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_item_supplier_price_history_supplier FOREIGN KEY (supplier_id)
+    REFERENCES supplier_master (supplier_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO item_supplier_price_history
+  (item_id, supplier_id, previous_purchase_rate, new_purchase_rate,
+   previous_currency_code, new_currency_code, change_type, effective_from,
+   changed_by, changed_on)
+SELECT S.item_id, S.supplier_id, NULL, S.purchase_rate,
+  NULL, S.currency_code, 'BASELINE', S.effective_from,
+  COALESCE(NULLIF(S.updated_by, ''), NULLIF(S.created_by, ''), 'SYSTEM'),
+  COALESCE(S.updated_on, S.created_on, CURRENT_TIMESTAMP)
+FROM item_supplier S
+WHERE S.purchase_rate IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM item_supplier_price_history H
+    WHERE H.item_id = S.item_id
+      AND H.supplier_id = S.supplier_id
+  );
 
 -- ============================================================================
 -- Retired Item fields and Raw Material-only Material/Grade
@@ -855,6 +941,8 @@ CREATE TABLE IF NOT EXISTS inspection_instrument_master (
   instrument_code VARCHAR(30) NOT NULL,
   instrument_name VARCHAR(150) NOT NULL,
   active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (instrument_master_id),
   UNIQUE KEY uq_inspection_instrument_code (instrument_code),
   UNIQUE KEY uq_inspection_instrument_name (instrument_name)
@@ -888,6 +976,8 @@ CREATE TABLE IF NOT EXISTS tolerance_grade_master (
   lower_deviation_microns DECIMAL(12,4) NOT NULL DEFAULT 0,
   upper_deviation_microns DECIMAL(12,4) NOT NULL DEFAULT 0,
   active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (tolerance_grade_id),
   UNIQUE KEY uq_tolerance_grade_range (grade_code,basic_size_from,basic_size_to)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1208,6 +1298,137 @@ INSERT INTO tolerance_grade_master
  ('H8',0,3,0,14),('H8',3,6,0,18),('H8',6,10,0,22),('H8',10,18,0,27)
 ON DUPLICATE KEY UPDATE lower_deviation_microns=VALUES(lower_deviation_microns),
  upper_deviation_microns=VALUES(upper_deviation_microns),active_flag='Y';
+
+-- ============================================================================
+-- Drawing-revision Part cloning and staged release
+-- Source: part-revision-clone-migration.sql
+-- ============================================================================
+
+-- Drawing-revision Part clone workflow.
+-- Safe to re-run in MySQL 5.7+ / MySQL 8.0+.
+
+SET @atech_part_revision_status_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND COLUMN_NAME='part_status'
+      AND COLUMN_TYPE LIKE '%DRAWING_UNDER_REVISION%'),
+  'SELECT 1',
+  "ALTER TABLE part_master MODIFY COLUMN part_status ENUM('ACTIVE','INACTIVE','DRAWING_UNDER_REVISION') NOT NULL DEFAULT 'ACTIVE'"
+);
+PREPARE atech_part_revision_status_statement FROM @atech_part_revision_status_sql;
+EXECUTE atech_part_revision_status_statement;
+DEALLOCATE PREPARE atech_part_revision_status_statement;
+
+SET @atech_part_revision_source_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND COLUMN_NAME='revision_source_part_id'),
+  'SELECT 1',
+  'ALTER TABLE part_master ADD COLUMN revision_source_part_id BIGINT UNSIGNED NULL AFTER active_flag'
+);
+PREPARE atech_part_revision_source_statement FROM @atech_part_revision_source_sql;
+EXECUTE atech_part_revision_source_statement;
+DEALLOCATE PREPARE atech_part_revision_source_statement;
+
+SET @atech_part_bom_release_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND COLUMN_NAME='bom_release_status'),
+  'SELECT 1',
+  "ALTER TABLE part_master ADD COLUMN bom_release_status ENUM('DRAFT','RELEASED','NOT_REQUIRED') NOT NULL DEFAULT 'NOT_REQUIRED' AFTER revision_source_part_id"
+);
+PREPARE atech_part_bom_release_statement FROM @atech_part_bom_release_sql;
+EXECUTE atech_part_bom_release_statement;
+DEALLOCATE PREPARE atech_part_bom_release_statement;
+
+SET @atech_part_bom_released_by_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND COLUMN_NAME='bom_released_by'),
+  'SELECT 1',
+  'ALTER TABLE part_master ADD COLUMN bom_released_by VARCHAR(50) NULL AFTER bom_release_status'
+);
+PREPARE atech_part_bom_released_by_statement FROM @atech_part_bom_released_by_sql;
+EXECUTE atech_part_bom_released_by_statement;
+DEALLOCATE PREPARE atech_part_bom_released_by_statement;
+
+SET @atech_part_bom_released_on_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND COLUMN_NAME='bom_released_on'),
+  'SELECT 1',
+  'ALTER TABLE part_master ADD COLUMN bom_released_on DATETIME NULL AFTER bom_released_by'
+);
+PREPARE atech_part_bom_released_on_statement FROM @atech_part_bom_released_on_sql;
+EXECUTE atech_part_bom_released_on_statement;
+DEALLOCATE PREPARE atech_part_bom_released_on_statement;
+
+SET @atech_part_revision_source_index_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND INDEX_NAME='ix_part_revision_source'),
+  'SELECT 1',
+  'ALTER TABLE part_master ADD KEY ix_part_revision_source (revision_source_part_id)'
+);
+PREPARE atech_part_revision_source_index_statement FROM @atech_part_revision_source_index_sql;
+EXECUTE atech_part_revision_source_index_statement;
+DEALLOCATE PREPARE atech_part_revision_source_index_statement;
+
+SET @atech_part_revision_source_fk_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.TABLE_CONSTRAINTS
+    WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='part_master' AND CONSTRAINT_NAME='fk_part_revision_source'),
+  'SELECT 1',
+  'ALTER TABLE part_master ADD CONSTRAINT fk_part_revision_source FOREIGN KEY (revision_source_part_id) REFERENCES part_master(part_id) ON UPDATE CASCADE ON DELETE RESTRICT'
+);
+PREPARE atech_part_revision_source_fk_statement FROM @atech_part_revision_source_fk_sql;
+EXECUTE atech_part_revision_source_fk_statement;
+DEALLOCATE PREPARE atech_part_revision_source_fk_statement;
+
+-- ============================================================================
+-- Instrument Master audit timestamps
+-- Source: instrument-master-audit-columns-migration.sql
+-- ============================================================================
+
+-- Adds the audit timestamps required by the technical-master list queries.
+-- Safe to run repeatedly on an existing MySQL 5.7+ production database.
+
+SET @instrument_master_created_on_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='inspection_instrument_master'
+      AND COLUMN_NAME='created_on'),
+  'SELECT ''inspection_instrument_master.created_on already exists'' AS result',
+  'ALTER TABLE inspection_instrument_master ADD COLUMN created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER active_flag'
+);
+PREPARE instrument_master_created_on_statement FROM @instrument_master_created_on_sql;
+EXECUTE instrument_master_created_on_statement;
+DEALLOCATE PREPARE instrument_master_created_on_statement;
+
+SET @instrument_master_updated_on_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='inspection_instrument_master'
+      AND COLUMN_NAME='updated_on'),
+  'SELECT ''inspection_instrument_master.updated_on already exists'' AS result',
+  'ALTER TABLE inspection_instrument_master ADD COLUMN updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_on'
+);
+PREPARE instrument_master_updated_on_statement FROM @instrument_master_updated_on_sql;
+EXECUTE instrument_master_updated_on_statement;
+DEALLOCATE PREPARE instrument_master_updated_on_statement;
+
+SET @tolerance_grade_created_on_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tolerance_grade_master'
+      AND COLUMN_NAME='created_on'),
+  'SELECT ''tolerance_grade_master.created_on already exists'' AS result',
+  'ALTER TABLE tolerance_grade_master ADD COLUMN created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER active_flag'
+);
+PREPARE tolerance_grade_created_on_statement FROM @tolerance_grade_created_on_sql;
+EXECUTE tolerance_grade_created_on_statement;
+DEALLOCATE PREPARE tolerance_grade_created_on_statement;
+
+SET @tolerance_grade_updated_on_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tolerance_grade_master'
+      AND COLUMN_NAME='updated_on'),
+  'SELECT ''tolerance_grade_master.updated_on already exists'' AS result',
+  'ALTER TABLE tolerance_grade_master ADD COLUMN updated_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_on'
+);
+PREPARE tolerance_grade_updated_on_statement FROM @tolerance_grade_updated_on_sql;
+EXECUTE tolerance_grade_updated_on_statement;
+DEALLOCATE PREPARE tolerance_grade_updated_on_statement;
 
 -- ============================================================================
 -- Item Master incoming-inspection characteristics
@@ -1887,13 +2108,16 @@ ON DUPLICATE KEY UPDATE lower_deviation_microns=VALUES(lower_deviation_microns),
 CREATE TABLE IF NOT EXISTS marketing_enquiries (
   enquiry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   doc_no VARCHAR(50) NOT NULL,
-  customer_id BIGINT UNSIGNED NOT NULL,
-  customer_code_snapshot VARCHAR(50) NOT NULL,
-  customer_name_snapshot VARCHAR(200) NOT NULL,
+  customer_id BIGINT UNSIGNED NULL,
+  customer_code_snapshot VARCHAR(50) NULL,
+  customer_name_snapshot VARCHAR(200) NULL,
   customer_short_name_snapshot VARCHAR(100) NULL,
+  customer_representative_name VARCHAR(150) NULL,
   enquiry_mode VARCHAR(20) NOT NULL DEFAULT 'MAIL',
   order_type VARCHAR(20) NOT NULL DEFAULT 'SALES',
   required_date DATE NULL,
+  customer_enquiry_reference VARCHAR(100) NULL,
+  customer_enquiry_date DATE NULL,
   po_reference VARCHAR(100) NULL,
   enquiry_status VARCHAR(30) NOT NULL DEFAULT 'IN_PROGRESS',
   enquiry_conversion VARCHAR(30) NOT NULL DEFAULT 'YET_TO_RECEIVE',
@@ -2188,6 +2412,7 @@ CREATE TABLE IF NOT EXISTS marketing_workouts (
   additional_material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   assembly_labour_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  actual_material_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   material_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
   turning_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   vmc_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
@@ -2215,6 +2440,8 @@ CREATE TABLE IF NOT EXISTS marketing_workouts (
   special_tool_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   gauge_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   trial_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
+  sample_cost_percent DECIMAL(7,4) NOT NULL DEFAULT 0,
+  sample_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   total_development_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   total_development_cost_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
   save_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
@@ -2244,6 +2471,8 @@ CREATE TABLE IF NOT EXISTS marketing_workout_process_costs (
   workout_id BIGINT UNSIGNED NOT NULL,
   process_type VARCHAR(50) NOT NULL,
   process_description VARCHAR(300) NULL,
+  total_cycle_time_seconds DECIMAL(14,4) NULL,
+  machine_cost_inr DECIMAL(18,4) NULL,
   cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   display_order INT UNSIGNED NOT NULL DEFAULT 1,
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
@@ -2306,6 +2535,8 @@ CREATE TABLE IF NOT EXISTS marketing_workout_subpart_process_costs (
   workout_subpart_id BIGINT UNSIGNED NOT NULL,
   process_type VARCHAR(50) NOT NULL,
   process_description VARCHAR(300) NULL,
+  total_cycle_time_seconds DECIMAL(14,4) NULL,
+  machine_cost_inr DECIMAL(18,4) NULL,
   cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   display_order INT UNSIGNED NOT NULL DEFAULT 1,
   active_flag ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
@@ -2330,20 +2561,22 @@ ON DUPLICATE KEY UPDATE
   active_flag = 'Y';
 
 INSERT INTO marketing_reference_values
-  (reference_type, value_code, display_label, sort_order)
+  (reference_type, value_code, display_label, numeric_value, sort_order)
 VALUES
-  ('MACHINING_PROCESS', 'TURNING', 'Turning', 10),
-  ('MACHINING_PROCESS', 'VMC', 'VMC', 20),
-  ('MACHINING_PROCESS', 'KEYWAY_SPLINE', 'Keyway / Spline', 30),
-  ('MACHINING_PROCESS', 'HEAT_TREATMENT', 'Heat Treatment', 40),
-  ('MACHINING_PROCESS', 'SHAPING_GEAR', 'Shaping / Gear', 50),
-  ('MACHINING_PROCESS', 'OTHER', 'Other Process', 60),
-  ('CURRENCY', 'INR', 'Indian Rupee', 10),
-  ('CURRENCY', 'EUR', 'Euro', 20),
-  ('CURRENCY', 'USD', 'US Dollar', 30),
-  ('CURRENCY', 'GBP', 'British Pound', 40)
+  ('MACHINING_PROCESS', 'TURNING', 'Turning', 300, 10),
+  ('MACHINING_PROCESS', 'VMC', 'VMC', 500, 20),
+  ('MACHINING_PROCESS', 'HMC', 'HMC', 1000, 30),
+  ('MACHINING_PROCESS', 'KEYWAY_SPLINE', 'Keyway / Spline', NULL, 40),
+  ('MACHINING_PROCESS', 'HEAT_TREATMENT', 'Heat Treatment', NULL, 50),
+  ('MACHINING_PROCESS', 'SHAPING_GEAR', 'Shaping / Gear', NULL, 60),
+  ('MACHINING_PROCESS', 'OTHER', 'Other Process', NULL, 70),
+  ('CURRENCY', 'INR', 'Indian Rupee', NULL, 10),
+  ('CURRENCY', 'EUR', 'Euro', NULL, 20),
+  ('CURRENCY', 'USD', 'US Dollar', NULL, 30),
+  ('CURRENCY', 'GBP', 'British Pound', NULL, 40)
 ON DUPLICATE KEY UPDATE
   display_label = VALUES(display_label),
+  numeric_value = COALESCE(numeric_value, VALUES(numeric_value)),
   sort_order = VALUES(sort_order),
   active_flag = 'Y';
 
@@ -2445,6 +2678,7 @@ CREATE TABLE IF NOT EXISTS marketing_quotation_items (
   part_price_fob_foreign DECIMAL(18,4) NOT NULL,
   total_development_cost_inr DECIMAL(18,4) NOT NULL,
   total_development_cost_foreign DECIMAL(18,4) NOT NULL,
+  sample_cost_inr DECIMAL(18,4) NOT NULL DEFAULT 0,
   active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
   created_by VARCHAR(50) NOT NULL,
   created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2456,6 +2690,22 @@ CREATE TABLE IF NOT EXISTS marketing_quotation_items (
     REFERENCES marketing_enquiry_parts (enquiry_part_id) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT fk_quotation_item_workout FOREIGN KEY (workout_id)
     REFERENCES marketing_workouts (workout_id) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS marketing_quotation_item_optional_costs (
+  quotation_item_optional_cost_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  quotation_item_id BIGINT UNSIGNED NOT NULL,
+  cost_type VARCHAR(50) NOT NULL,
+  amount_foreign DECIMAL(18,4) NOT NULL DEFAULT 0,
+  charge_basis VARCHAR(20) NOT NULL DEFAULT 'ONE_TIME',
+  display_order INT UNSIGNED NOT NULL DEFAULT 1,
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (quotation_item_optional_cost_id),
+  UNIQUE KEY uq_quotation_item_optional_cost_type (quotation_item_id, cost_type),
+  KEY ix_quotation_item_optional_costs_item (quotation_item_id, display_order),
+  CONSTRAINT fk_quotation_item_optional_cost_item FOREIGN KEY (quotation_item_id)
+    REFERENCES marketing_quotation_items (quotation_item_id) ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS marketing_quotation_notes (
@@ -2518,12 +2768,38 @@ VALUES
  ('MOQ', 'Supply quantity is subject to the MOQ stated against each item.', 'Y', 30),
  ('CURRENCY', 'Prices are based on the quotation currency and exchange rate used in the completed Workout.', 'Y', 40),
  ('PRICE_VALIDITY', 'This quotation is valid for 30 days from the quotation date.', 'Y', 50),
- ('DEVELOPMENT', 'Development time and pilot batch delivery are as stated in the completed Workout.', 'Y', 60)
+ ('DEVELOPMENT', 'Development time and pilot batch delivery are as stated in the completed Workout.', 'Y', 60),
+ ('RAW_MATERIAL_WEIGHT_VARIATION', 'Any change in raw material weight during production may lead to a price revision.', 'Y', 70),
+ ('CURRENCY_RAW_MATERIAL_REVISION', 'Currency value changes and raw material price changes may lead to a price revision once every three months.', 'Y', 80)
 ON DUPLICATE KEY UPDATE note_text=VALUES(note_text), sort_order=VALUES(sort_order), active_flag='Y';
 
 INSERT INTO app_document_sequences (sequence_key, financial_year, prefix, current_number, number_padding)
 VALUES ('QUOTATION', '2026-27', 'QUO', 0, 4)
 ON DUPLICATE KEY UPDATE prefix=VALUES(prefix), number_padding=VALUES(number_padding);
+
+-- ============================================================================
+-- Application attachment storage
+-- Source: attachment-schema.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS application_attachments (
+  attachment_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL DEFAULT 'DEFAULT',
+  entity_type VARCHAR(50) NOT NULL,
+  entity_id BIGINT UNSIGNED NOT NULL,
+  attachment_type VARCHAR(50) NOT NULL DEFAULT 'OTHER',
+  attachment_name VARCHAR(255) NULL,
+  file_name VARCHAR(255) NOT NULL,
+  stored_file_name VARCHAR(255) NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  mime_type VARCHAR(150) NULL,
+  file_size_bytes BIGINT UNSIGNED NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NOT NULL,
+  created_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (attachment_id),
+  KEY ix_application_attachment_entity (tenant_id, entity_type, entity_id, active_flag)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
 -- Project-wide dropdown masters and Material/Grade/UOM relationships
@@ -2566,7 +2842,7 @@ INSERT INTO marketing_reference_values (reference_type,value_code,display_label,
  ('CUSTOMER_ATTACHMENT_TYPE','NDA','NDA',10),('CUSTOMER_ATTACHMENT_TYPE','AGREEMENT','Agreement',20),('CUSTOMER_ATTACHMENT_TYPE','GST_CERTIFICATE','GST Certificate',30),('CUSTOMER_ATTACHMENT_TYPE','PAN_CARD','PAN Card',40),('CUSTOMER_ATTACHMENT_TYPE','OTHER','Other',50),
  ('PART_CATEGORY','MACHINING','Machining',10),('PART_CATEGORY','ASSEMBLY','Assembly',20),
  ('DRAWING_CODE_MODE','AUTO_GENERATED','Auto Generated',10),('DRAWING_CODE_MODE','MANUAL','Manual',20),
- ('PART_ATTACHMENT_TYPE','CUSTOMER_DRAWING','Customer Drawing',10),('PART_ATTACHMENT_TYPE','CUSTOMER_STANDARD','Customer Standard',20),('PART_ATTACHMENT_TYPE','OTHER','Other',30),
+ ('PART_ATTACHMENT_TYPE','CUSTOMER_DRAWING','Customer Drawing',10),('PART_ATTACHMENT_TYPE','CUSTOMER_STANDARD','Customer Standard',20),('PART_ATTACHMENT_TYPE','PART_MODEL','Part Model (STEP/STP only)',30),('PART_ATTACHMENT_TYPE','BALLOONED_DRAWING','Ballooned Drawing',40),('PART_ATTACHMENT_TYPE','PATTERN_DIE_DRAWING','Pattern / Die Drawing',50),('PART_ATTACHMENT_TYPE','OTHER','Other',60),
  ('ENQUIRY_MODE','MAIL','Mail',10),('ENQUIRY_MODE','ORAL','Oral',20),('ENQUIRY_MODE','VISIT','Visit',30),
  ('ORDER_TYPE','SALES','Sales',10),('ORDER_TYPE','LABOUR','Labour',20),
  ('ENQUIRY_STATUS_TRANSITION','QUOTED','Quoted',10),('ENQUIRY_STATUS_TRANSITION','ORDER_RECEIVED','Order Received',20),
@@ -3405,6 +3681,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   item_type_snapshot VARCHAR(120) NOT NULL,
   item_description_snapshot VARCHAR(250) NOT NULL,
   item_specification_snapshot VARCHAR(1000) NULL,
+  other_specification VARCHAR(1000) NULL,
   uom_code_snapshot VARCHAR(30) NOT NULL,
   hsn_code_snapshot VARCHAR(20) NULL,
   ordered_quantity DECIMAL(18,3) NOT NULL,
@@ -3998,8 +4275,8 @@ FROM gauge_master ORDER BY gauge_master_id DESC LIMIT 20;
 -- ============================================================================
 
 -- Gauge Master home storage locations.
--- The configured application migration also seeds Main Stores / Gauge Rack for
--- the default tenant; this schema file keeps clean and upgraded databases aligned.
+-- The standard location seed provides both normal storage and the controlled
+-- holding rack used before an external calibration dispatch.
 
 CREATE TABLE IF NOT EXISTS inventory_locations (
   location_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -4011,6 +4288,11 @@ CREATE TABLE IF NOT EXISTS inventory_locations (
   UNIQUE KEY uq_inventory_location_tenant (tenant_id,location_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+INSERT INTO inventory_locations (tenant_id,warehouse_code,bin_location,active_flag) VALUES
+  ('DEFAULT','Main Stores','Gauge Rack','Y'),
+  ('DEFAULT','Calibration Hold','Dispatch Rack','Y')
+ON DUPLICATE KEY UPDATE active_flag='Y';
+
 ALTER TABLE gauge_master
   ADD COLUMN storage_location_id BIGINT UNSIGNED NULL;
 
@@ -4018,6 +4300,335 @@ ALTER TABLE gauge_master
   ADD CONSTRAINT fk_gauge_storage_location
   FOREIGN KEY (tenant_id,storage_location_id)
   REFERENCES inventory_locations(tenant_id,location_id);
+
+-- ============================================================================
+-- Warehouse and Location / Rack / Bin Master
+-- Source: location-master-migration.sql
+-- ============================================================================
+
+-- Warehouse and Location / Rack / Bin master for clean installations.
+-- A location is unique within a warehouse, so the same location name may exist
+-- under more than one warehouse when required.
+
+CREATE TABLE IF NOT EXISTS location_master (
+  location_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  warehouse_name VARCHAR(80) NOT NULL,
+  location_name VARCHAR(100) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NULL,
+  UNIQUE KEY uq_location_master_tenant_warehouse_location (tenant_id, warehouse_name, location_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Preserve the legacy storage rows so existing Gauge storage IDs remain valid.
+INSERT INTO location_master (tenant_id, warehouse_name, location_name, active_flag, created_by)
+SELECT tenant_id, warehouse_code, bin_location, active_flag, 'SYSTEM'
+FROM inventory_locations
+ON DUPLICATE KEY UPDATE active_flag=VALUES(active_flag);
+
+-- Approved physical-location mapping, including segregated customer-owned material.
+INSERT INTO location_master (tenant_id, warehouse_name, location_name, active_flag, created_by)
+SELECT tenants.tenant_id, locations.warehouse_name, locations.location_name, 'Y', 'SYSTEM'
+FROM (
+  SELECT 'DEFAULT' AS tenant_id
+  UNION SELECT DISTINCT tenant_id FROM inventory_locations
+  UNION SELECT DISTINCT tenant_id FROM purchase_requests
+) AS tenants
+CROSS JOIN (
+  SELECT 'Main Stores' AS warehouse_name, 'Project' AS location_name
+  UNION ALL SELECT 'Main Stores', 'Office'
+  UNION ALL SELECT 'Production Stores', 'V01'
+  UNION ALL SELECT 'Production Stores', 'V02'
+  UNION ALL SELECT 'Production Stores', 'V03'
+  UNION ALL SELECT 'Production Stores', 'V05'
+  UNION ALL SELECT 'Production Stores', 'V06'
+  UNION ALL SELECT 'Production Stores', 'V07'
+  UNION ALL SELECT 'Production Stores', 'V08'
+  UNION ALL SELECT 'Production Stores', 'V09'
+  UNION ALL SELECT 'Production Stores', 'V10'
+  UNION ALL SELECT 'Production Stores', 'V11'
+  UNION ALL SELECT 'Production Stores', 'V12'
+  UNION ALL SELECT 'Production Stores', 'T01'
+  UNION ALL SELECT 'Production Stores', 'T02'
+  UNION ALL SELECT 'Production Stores', 'T03'
+  UNION ALL SELECT 'Production Stores', 'T04'
+  UNION ALL SELECT 'Production Stores', 'T05'
+  UNION ALL SELECT 'Production Stores', 'T06'
+  UNION ALL SELECT 'Production Stores', 'Assembly'
+  UNION ALL SELECT 'Production Stores', 'Turning Area'
+  UNION ALL SELECT 'Tool Crib', 'Tooling'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack1'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack2'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack3'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack4'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack5'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack6'
+  UNION ALL SELECT 'Quality Hold Area', 'Quality Room'
+  UNION ALL SELECT 'Quality Hold Area', 'Final Inspection'
+  UNION ALL SELECT 'Quality Hold Area', 'CMM'
+  UNION ALL SELECT 'Quality Hold Area', 'CMS'
+  UNION ALL SELECT 'Customer Material Stores', 'Customer Material Receiving'
+  UNION ALL SELECT 'Customer Material Stores', 'Customer Material Rack'
+  UNION ALL SELECT 'Customer Material Stores', 'Customer Material Hold'
+) AS locations
+WHERE 1=1
+ON DUPLICATE KEY UPDATE active_flag='Y';
+
+-- inventory_locations remains the foreign-key target for existing Gauge records.
+-- Keep it synchronised from Location Master during a clean installation.
+INSERT INTO inventory_locations (tenant_id, warehouse_code, bin_location, active_flag)
+SELECT tenant_id, warehouse_name, location_name, active_flag
+FROM location_master
+ON DUPLICATE KEY UPDATE active_flag=VALUES(active_flag);
+
+-- ============================================================================
+-- Warehouse-aware Location Master upgrade and mapping
+-- Source: location-master-warehouse-migration.sql
+-- ============================================================================
+
+-- Upgrade an existing Location Master so it owns Warehouse + Location/Rack values.
+-- Safe to run more than once.
+
+CREATE TABLE IF NOT EXISTS location_master (
+  location_master_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  warehouse_name VARCHAR(80) NOT NULL,
+  location_name VARCHAR(100) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  created_by VARCHAR(50) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NULL,
+  UNIQUE KEY uq_location_master_tenant_warehouse_location (tenant_id, warehouse_name, location_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS inventory_locations (
+  location_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  warehouse_code VARCHAR(80) NOT NULL,
+  bin_location VARCHAR(100) NOT NULL,
+  active_flag ENUM('Y','N') NOT NULL DEFAULT 'Y',
+  UNIQUE KEY uq_inventory_location (tenant_id,warehouse_code,bin_location),
+  UNIQUE KEY uq_inventory_location_tenant (tenant_id,location_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @location_master_warehouse_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='location_master' AND COLUMN_NAME='warehouse_name'),
+  'SELECT 1',
+  'ALTER TABLE location_master ADD COLUMN warehouse_name VARCHAR(80) NOT NULL DEFAULT ''Main Stores'' AFTER tenant_id'
+);
+PREPARE location_master_warehouse_statement FROM @location_master_warehouse_sql;
+EXECUTE location_master_warehouse_statement;
+DEALLOCATE PREPARE location_master_warehouse_statement;
+
+SET @location_master_key_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='location_master'
+      AND INDEX_NAME='uq_location_master_tenant_warehouse_location'),
+  'SELECT 1',
+  IF(
+    EXISTS(SELECT 1 FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='location_master'
+        AND INDEX_NAME='uq_location_master_tenant_name'),
+    'ALTER TABLE location_master DROP INDEX uq_location_master_tenant_name, ADD UNIQUE KEY uq_location_master_tenant_warehouse_location (tenant_id,warehouse_name,location_name)',
+    'ALTER TABLE location_master ADD UNIQUE KEY uq_location_master_tenant_warehouse_location (tenant_id,warehouse_name,location_name)'
+  )
+);
+PREPARE location_master_key_statement FROM @location_master_key_sql;
+EXECUTE location_master_key_statement;
+DEALLOCATE PREPARE location_master_key_statement;
+
+UPDATE location_master
+SET warehouse_name = CASE UPPER(location_name)
+  WHEN 'PROJECT' THEN 'Main Stores'
+  WHEN 'OFFICE' THEN 'Main Stores'
+  WHEN 'V01' THEN 'Production Stores'
+  WHEN 'V02' THEN 'Production Stores'
+  WHEN 'V03' THEN 'Production Stores'
+  WHEN 'V05' THEN 'Production Stores'
+  WHEN 'V06' THEN 'Production Stores'
+  WHEN 'V07' THEN 'Production Stores'
+  WHEN 'V08' THEN 'Production Stores'
+  WHEN 'V09' THEN 'Production Stores'
+  WHEN 'V10' THEN 'Production Stores'
+  WHEN 'V11' THEN 'Production Stores'
+  WHEN 'V12' THEN 'Production Stores'
+  WHEN 'T01' THEN 'Production Stores'
+  WHEN 'T02' THEN 'Production Stores'
+  WHEN 'T03' THEN 'Production Stores'
+  WHEN 'T04' THEN 'Production Stores'
+  WHEN 'T05' THEN 'Production Stores'
+  WHEN 'T06' THEN 'Production Stores'
+  WHEN 'ASSEMBLY' THEN 'Production Stores'
+  WHEN 'TURNING AREA' THEN 'Production Stores'
+  WHEN 'TOOLING' THEN 'Tool Crib'
+  WHEN 'GAUGE RACK1' THEN 'Tool Crib'
+  WHEN 'GAUGE RACK2' THEN 'Tool Crib'
+  WHEN 'GAUGE RACK3' THEN 'Tool Crib'
+  WHEN 'GAUGE RACK4' THEN 'Tool Crib'
+  WHEN 'GAUGE RACK5' THEN 'Tool Crib'
+  WHEN 'GAUGE RACK6' THEN 'Tool Crib'
+  WHEN 'QUALITY ROOM' THEN 'Quality Hold Area'
+  WHEN 'FINAL INSPECTION' THEN 'Quality Hold Area'
+  WHEN 'CMM' THEN 'Quality Hold Area'
+  WHEN 'CMS' THEN 'Quality Hold Area'
+  ELSE COALESCE(NULLIF(TRIM(warehouse_name),''),'Main Stores')
+END;
+
+INSERT INTO location_master (tenant_id, warehouse_name, location_name, active_flag, created_by)
+SELECT IL.tenant_id, IL.warehouse_code, IL.bin_location, IL.active_flag, 'SYSTEM'
+FROM inventory_locations IL
+LEFT JOIN location_master LM
+  ON LM.tenant_id=IL.tenant_id
+ AND LM.warehouse_name=IL.warehouse_code
+ AND LM.location_name=IL.bin_location
+WHERE LM.location_master_id IS NULL;
+
+INSERT INTO location_master (tenant_id, warehouse_name, location_name, active_flag, created_by)
+SELECT tenants.tenant_id, locations.warehouse_name, locations.location_name, 'Y', 'SYSTEM'
+FROM (
+  SELECT 'DEFAULT' AS tenant_id
+  UNION SELECT DISTINCT tenant_id FROM inventory_locations
+  UNION SELECT DISTINCT tenant_id FROM purchase_requests
+  UNION SELECT DISTINCT tenant_id FROM location_master
+) AS tenants
+CROSS JOIN (
+  SELECT 'Main Stores' AS warehouse_name, 'Project' AS location_name
+  UNION ALL SELECT 'Main Stores', 'Office'
+  UNION ALL SELECT 'Production Stores', 'V01'
+  UNION ALL SELECT 'Production Stores', 'V02'
+  UNION ALL SELECT 'Production Stores', 'V03'
+  UNION ALL SELECT 'Production Stores', 'V05'
+  UNION ALL SELECT 'Production Stores', 'V06'
+  UNION ALL SELECT 'Production Stores', 'V07'
+  UNION ALL SELECT 'Production Stores', 'V08'
+  UNION ALL SELECT 'Production Stores', 'V09'
+  UNION ALL SELECT 'Production Stores', 'V10'
+  UNION ALL SELECT 'Production Stores', 'V11'
+  UNION ALL SELECT 'Production Stores', 'V12'
+  UNION ALL SELECT 'Production Stores', 'T01'
+  UNION ALL SELECT 'Production Stores', 'T02'
+  UNION ALL SELECT 'Production Stores', 'T03'
+  UNION ALL SELECT 'Production Stores', 'T04'
+  UNION ALL SELECT 'Production Stores', 'T05'
+  UNION ALL SELECT 'Production Stores', 'T06'
+  UNION ALL SELECT 'Production Stores', 'Assembly'
+  UNION ALL SELECT 'Production Stores', 'Turning Area'
+  UNION ALL SELECT 'Tool Crib', 'Tooling'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack1'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack2'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack3'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack4'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack5'
+  UNION ALL SELECT 'Tool Crib', 'Gauge Rack6'
+  UNION ALL SELECT 'Quality Hold Area', 'Quality Room'
+  UNION ALL SELECT 'Quality Hold Area', 'Final Inspection'
+  UNION ALL SELECT 'Quality Hold Area', 'CMM'
+  UNION ALL SELECT 'Quality Hold Area', 'CMS'
+  UNION ALL SELECT 'Customer Material Stores', 'Customer Material Receiving'
+  UNION ALL SELECT 'Customer Material Stores', 'Customer Material Rack'
+  UNION ALL SELECT 'Customer Material Stores', 'Customer Material Hold'
+) AS locations
+WHERE 1=1
+ON DUPLICATE KEY UPDATE active_flag='Y';
+
+INSERT INTO inventory_locations (tenant_id, warehouse_code, bin_location, active_flag)
+SELECT tenant_id, warehouse_name, location_name, active_flag
+FROM location_master
+ON DUPLICATE KEY UPDATE active_flag=VALUES(active_flag);
+
+-- ============================================================================
+-- Controlled Finished Goods Dispatch and Outsource Material Issue
+-- Source: material-outward-migration.sql
+-- ============================================================================
+
+-- Controlled outbound material documents.
+-- Company stock is reduced only when an approved document is dispatched.
+
+CREATE TABLE IF NOT EXISTS material_outward_documents (
+  material_outward_document_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  company_id VARCHAR(64) NULL,
+  plant_id VARCHAR(64) NULL,
+  outward_number VARCHAR(50) NOT NULL,
+  outward_date DATE NOT NULL,
+  outward_type VARCHAR(30) NOT NULL,
+  document_status VARCHAR(30) NOT NULL DEFAULT 'PENDING_APPROVAL',
+  customer_id BIGINT UNSIGNED NULL,
+  supplier_id BIGINT UNSIGNED NULL,
+  party_code_snapshot VARCHAR(80) NULL,
+  party_name_snapshot VARCHAR(255) NOT NULL,
+  transport_mode VARCHAR(50) NULL,
+  transport_reference VARCHAR(160) NULL,
+  gate_exit_reference VARCHAR(160) NULL,
+  remarks VARCHAR(1000) NULL,
+  approval_remarks VARCHAR(1000) NULL,
+  approved_by VARCHAR(50) NULL,
+  approved_at DATETIME NULL,
+  dispatched_by VARCHAR(50) NULL,
+  dispatched_at DATETIME NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_material_outward_number (tenant_id, outward_number),
+  KEY ix_material_outward_workflow (tenant_id, document_status, outward_date),
+  KEY ix_material_outward_customer (tenant_id, customer_id),
+  KEY ix_material_outward_supplier (tenant_id, supplier_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS material_outward_document_items (
+  material_outward_document_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  material_outward_document_id BIGINT UNSIGNED NOT NULL,
+  inventory_stock_balance_id BIGINT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  item_code_snapshot VARCHAR(100) NULL,
+  item_description_snapshot VARCHAR(500) NOT NULL,
+  uom_code_snapshot VARCHAR(50) NULL,
+  warehouse_code_snapshot VARCHAR(80) NOT NULL,
+  bin_location_snapshot VARCHAR(80) NOT NULL,
+  batch_serial_number_snapshot VARCHAR(120) NOT NULL DEFAULT '',
+  outward_quantity DECIMAL(18,3) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_material_outward_document_items_document (material_outward_document_id),
+  KEY ix_material_outward_document_items_stock (inventory_stock_balance_id),
+  CONSTRAINT fk_material_outward_item_document FOREIGN KEY (material_outward_document_id)
+    REFERENCES material_outward_documents(material_outward_document_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tracks stock that has physically left the company for an outsource operation.
+CREATE TABLE IF NOT EXISTS outsourcing_issue_wip_balance (
+  outsourcing_issue_wip_balance_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL,
+  material_outward_document_id BIGINT UNSIGNED NOT NULL,
+  material_outward_document_item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  supplier_name_snapshot VARCHAR(255) NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  item_code_snapshot VARCHAR(100) NULL,
+  item_description_snapshot VARCHAR(500) NOT NULL,
+  uom_code_snapshot VARCHAR(50) NULL,
+  source_warehouse_code VARCHAR(80) NOT NULL,
+  source_bin_location VARCHAR(80) NOT NULL,
+  batch_serial_number VARCHAR(120) NOT NULL DEFAULT '',
+  quantity_issued DECIMAL(18,3) NOT NULL,
+  quantity_returned DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  wip_status VARCHAR(30) NOT NULL DEFAULT 'ISSUED',
+  issued_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(50) NOT NULL,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_outsource_issue_document_line (material_outward_document_item_id),
+  KEY ix_outsource_issue_wip (tenant_id, supplier_id, wip_status),
+  CONSTRAINT fk_outsource_issue_document FOREIGN KEY (material_outward_document_id)
+    REFERENCES material_outward_documents(material_outward_document_id) ON DELETE CASCADE,
+  CONSTRAINT fk_outsource_issue_document_item FOREIGN KEY (material_outward_document_item_id)
+    REFERENCES material_outward_document_items(material_outward_document_item_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
 -- Gauge Master bulk Issue and Return vouchers
@@ -4113,6 +4724,72 @@ ALTER TABLE gauge_movement_batches
   ADD CONSTRAINT fk_gauge_calibration_dispatch_po
     FOREIGN KEY (service_purchase_order_id)
     REFERENCES purchase_orders(purchase_order_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT;
+
+-- ============================================================================
+-- Calibration Return GRNs linked to calibration dispatch challans
+-- Source: gauge-calibration-return-grn-migration.sql
+-- ============================================================================
+
+-- Calibration Return GRN headers are linked to the original external calibration dispatch.
+-- A return can contain one or more Gauge IDs from a GCD, which supports partial receipts.
+
+ALTER TABLE gauge_movement_batches
+  MODIFY COLUMN movement_type ENUM('ISSUE','RETURN','CALIBRATION_DISPATCH','CALIBRATION_RETURN') NOT NULL;
+
+ALTER TABLE gauge_movement_batches
+  MODIFY COLUMN dispatch_status ENUM('DISPATCHED','PARTIALLY_RETURNED','RETURNED','CANCELLED') NOT NULL DEFAULT 'DISPATCHED';
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN source_calibration_dispatch_id BIGINT UNSIGNED NULL AFTER courier_reference;
+
+ALTER TABLE gauge_movement_batches
+  ADD KEY ix_gauge_calibration_return_source (tenant_id,source_calibration_dispatch_id,movement_date);
+
+ALTER TABLE gauge_movement_batches
+  ADD CONSTRAINT fk_gauge_calibration_return_source
+  FOREIGN KEY (source_calibration_dispatch_id)
+  REFERENCES gauge_movement_batches(gauge_movement_batch_id)
+  ON UPDATE CASCADE ON DELETE RESTRICT;
+
+-- ============================================================================
+-- Calibration dispatches linked to one GRN Outward document
+-- Source: material-outward-calibration-dispatch-migration.sql
+-- ============================================================================
+
+-- Links the calibration-dispatch detail/history batch to its single GRN Outward document.
+-- The movement batch stores Gauge-ID traceability; it is not a second challan.
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN material_outward_document_id BIGINT UNSIGNED NULL AFTER source_calibration_dispatch_id;
+
+ALTER TABLE gauge_movement_batches
+  ADD UNIQUE KEY uq_gauge_calibration_outward_document (material_outward_document_id);
+
+ALTER TABLE gauge_movement_batches
+  ADD CONSTRAINT fk_gauge_calibration_outward_document
+  FOREIGN KEY (material_outward_document_id)
+  REFERENCES material_outward_documents(material_outward_document_id)
+  ON UPDATE CASCADE ON DELETE RESTRICT;
+
+-- ============================================================================
+-- Calibration Return GRNs created from Gate Entry and GRN Inward
+-- Source: calibration-return-grn-inward-migration.sql
+-- ============================================================================
+
+-- Calibration returns arrive through Gate Entry as a service receipt and are
+-- completed from GRN Inward against the original calibration dispatch challan.
+
+ALTER TABLE purchase_gate_entries
+  ADD COLUMN service_type VARCHAR(40) NULL AFTER entry_type,
+  ADD KEY ix_gate_entry_service_type (tenant_id, entry_type, service_type, status);
+
+ALTER TABLE gauge_movement_batches
+  ADD COLUMN gate_entry_id BIGINT UNSIGNED NULL AFTER material_outward_document_id,
+  ADD UNIQUE KEY uq_gauge_calibration_return_gate_entry (gate_entry_id),
+  ADD CONSTRAINT fk_gauge_calibration_return_gate_entry
+    FOREIGN KEY (gate_entry_id)
+    REFERENCES purchase_gate_entries(gate_entry_id)
     ON UPDATE CASCADE ON DELETE RESTRICT;
 
 -- ============================================================================
@@ -4882,6 +5559,19 @@ ALTER TABLE return_to_customer_documents
   ADD COLUMN transport_mode VARCHAR(50) NULL AFTER dispatch_reference;
 
 -- ============================================================================
+-- Courier name and receipt details for Gate Entry
+-- Source: gate-entry-courier-details-migration.sql
+-- ============================================================================
+
+-- Courier gate entries need a traceable carrier and receipt / docket reference.
+
+ALTER TABLE purchase_gate_entries
+  ADD COLUMN courier_name VARCHAR(150) NULL AFTER transport_mode;
+
+ALTER TABLE purchase_gate_entries
+  ADD COLUMN courier_receipt_number VARCHAR(120) NULL AFTER courier_name;
+
+-- ============================================================================
 -- Purchased Item group
 -- Source: purchased-item-group-migration.sql
 -- ============================================================================
@@ -5088,7 +5778,7 @@ FROM (
 
   SELECT 'CA','Holders','item_subtype','Item Type','SELECT','Y',JSON_ARRAY('BT40','BT50'),NULL,NULL,NULL,NULL,NULL,10 UNION ALL
   SELECT 'CA','Holders','holder_length','Holder Length','NUMBER','N',NULL,JSON_ARRAY('MM','CM','MTR'),'MM',NULL,NULL,NULL,20 UNION ALL
-  SELECT 'CA','Holders','holder_type','Holder Type','SELECT','N',JSON_ARRAY('ER11','ER16','ER20','ER25','ER32','ER40'),NULL,NULL,NULL,NULL,NULL,30 UNION ALL
+  SELECT 'CA','Holders','holder_type','Holder Type','SELECT','N',JSON_ARRAY('ER11','ER16','ER20','ER25','ER32','ER40','CKB1','CKB2','CKB3','CKB4','CKB5','CKB6'),NULL,NULL,NULL,NULL,NULL,30 UNION ALL
 
   SELECT 'CA','Turning Bars','specification','Specification','TEXT','N',NULL,NULL,NULL,NULL,NULL,NULL,10 UNION ALL
 
@@ -5203,6 +5893,282 @@ JOIN item_type_master T ON T.item_group_id=G.item_group_id AND T.type_name=X.typ
 ON DUPLICATE KEY UPDATE
   condition_field_code=VALUES(condition_field_code),condition_operator=VALUES(condition_operator),
   condition_value=VALUES(condition_value),template_text=VALUES(template_text),active_flag='Y';
+
+COMMIT;
+
+-- ============================================================================
+-- Purchase Order other specification
+-- Source: purchase-order-other-specification-migration.sql
+-- ============================================================================
+
+-- Adds a purchaser-entered specification note to each PO line.
+-- Safe to run repeatedly on an existing production database from Adminer.
+SET @purchase_order_other_specification_sql := IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='purchase_order_items'
+      AND COLUMN_NAME='other_specification'),
+  'SELECT ''purchase_order_items.other_specification already exists'' AS result',
+  'ALTER TABLE purchase_order_items ADD COLUMN other_specification VARCHAR(1000) NULL AFTER item_specification_snapshot'
+);
+PREPARE purchase_order_other_specification_statement FROM @purchase_order_other_specification_sql;
+EXECUTE purchase_order_other_specification_statement;
+DEALLOCATE PREPARE purchase_order_other_specification_statement;
+
+-- ============================================================================
+-- Quantity-based Tooling lifecycle linked to Item Master
+-- Source: tooling-lifecycle-migration.sql
+-- ============================================================================
+
+-- Quantity-based Tooling lifecycle.
+-- Tool records are normal Item Master records in the Tools & Fixtures (TL) group.
+-- No physical Tool ID or serial registration is created by this schema.
+
+CREATE TABLE IF NOT EXISTS tooling_stock_balance (
+  tooling_stock_balance_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  company_id VARCHAR(64) NULL,
+  plant_id VARCHAR(64) NOT NULL DEFAULT '',
+  item_id BIGINT UNSIGNED NOT NULL,
+  warehouse_code VARCHAR(80) NOT NULL,
+  bin_location VARCHAR(80) NOT NULL,
+  stock_status ENUM('AVAILABLE','HOLD','REGRIND_REQUIRED') NOT NULL DEFAULT 'AVAILABLE',
+  quantity_on_hand DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tooling_stock_balance_id),
+  UNIQUE KEY uq_tooling_stock_location (tenant_id,plant_id,item_id,warehouse_code,bin_location,stock_status),
+  KEY ix_tooling_stock_item (tenant_id,item_id),
+  KEY ix_tooling_stock_location (tenant_id,warehouse_code,bin_location),
+  CONSTRAINT fk_tooling_stock_item FOREIGN KEY (item_id) REFERENCES item_master(item_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tooling_item_metrics (
+  tooling_item_metric_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  regrind_event_count INT UNSIGNED NOT NULL DEFAULT 0,
+  regrind_quantity_total DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  last_regrind_date DATE NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tooling_item_metric_id),
+  UNIQUE KEY uq_tooling_item_metric (tenant_id,item_id),
+  CONSTRAINT fk_tooling_item_metric_item FOREIGN KEY (item_id) REFERENCES item_master(item_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tooling_regrind_batches (
+  tooling_regrind_batch_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  company_id VARCHAR(64) NULL,
+  plant_id VARCHAR(64) NOT NULL DEFAULT '',
+  dc_number VARCHAR(80) NOT NULL,
+  dispatch_date DATE NOT NULL,
+  supplier_name VARCHAR(160) NOT NULL,
+  expected_return_date DATE NULL,
+  courier_vehicle_reference VARCHAR(160) NULL,
+  dispatch_warehouse_code VARCHAR(80) NOT NULL DEFAULT 'Tool Crib',
+  dispatch_bin_location VARCHAR(80) NOT NULL DEFAULT 'Tooling',
+  material_outward_document_id BIGINT UNSIGNED NULL,
+  return_grn_number VARCHAR(80) NULL,
+  return_gate_entry_id BIGINT UNSIGNED NULL,
+  receipt_reference VARCHAR(160) NULL,
+  receipt_date DATE NULL,
+  status ENUM('DISPATCHED','RECEIVED_PENDING_INSPECTION','CLOSED','CANCELLED') NOT NULL DEFAULT 'DISPATCHED',
+  remarks VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tooling_regrind_batch_id),
+  UNIQUE KEY uq_tooling_regrind_dc (tenant_id,dc_number),
+  UNIQUE KEY uq_tooling_regrind_return_grn (tenant_id,return_grn_number),
+  KEY ix_tooling_regrind_status (tenant_id,status,dispatch_date),
+  KEY ix_tooling_regrind_outward_document (material_outward_document_id),
+  KEY ix_tooling_regrind_return_gate (return_gate_entry_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tooling_regrind_batch_items (
+  tooling_regrind_batch_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  tooling_regrind_batch_id BIGINT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  uom_code_snapshot VARCHAR(30) NULL,
+  dispatched_quantity DECIMAL(18,3) NOT NULL,
+  received_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  accepted_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  rejected_quantity DECIMAL(18,3) NOT NULL DEFAULT 0.000,
+  measured_value DECIMAL(18,4) NULL,
+  inspection_remarks VARCHAR(1000) NULL,
+  rejection_action ENUM('SCRAP','REGRIND_AGAIN','RETURN_TO_TOOL_CRIB') NULL,
+  line_status ENUM('DISPATCHED','RECEIVED_PENDING_INSPECTION','CLOSED') NOT NULL DEFAULT 'DISPATCHED',
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(50) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (tooling_regrind_batch_item_id),
+  UNIQUE KEY uq_tooling_regrind_batch_item (tooling_regrind_batch_id,item_id),
+  KEY ix_tooling_regrind_item_status (tenant_id,item_id,line_status),
+  CONSTRAINT fk_tooling_regrind_item_batch FOREIGN KEY (tooling_regrind_batch_id) REFERENCES tooling_regrind_batches(tooling_regrind_batch_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_tooling_regrind_item_item FOREIGN KEY (item_id) REFERENCES item_master(item_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tooling_stock_movements (
+  tooling_stock_movement_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  company_id VARCHAR(64) NULL,
+  plant_id VARCHAR(64) NOT NULL DEFAULT '',
+  item_id BIGINT UNSIGNED NOT NULL,
+  movement_type ENUM('GRN_RECEIPT','ISSUE_TO_PRODUCTION','RETURN_FROM_PRODUCTION','RETURN_DAMAGED_REGRIND','RETURN_LOST','RETURN_SCRAP','REGRIND_DISPATCH','REGRIND_RECEIPT','REGRIND_ACCEPTED','REGRIND_REJECTED_SCRAP','REGRIND_REJECTED_REPEAT','REGRIND_REJECTED_RETURN') NOT NULL,
+  movement_date DATE NOT NULL,
+  quantity DECIMAL(18,3) NOT NULL,
+  from_warehouse_code VARCHAR(80) NULL,
+  from_bin_location VARCHAR(80) NULL,
+  to_warehouse_code VARCHAR(80) NULL,
+  to_bin_location VARCHAR(80) NULL,
+  reference_number VARCHAR(160) NULL,
+  grn_id BIGINT UNSIGNED NULL,
+  grn_item_id BIGINT UNSIGNED NULL,
+  tooling_regrind_batch_id BIGINT UNSIGNED NULL,
+  tooling_regrind_batch_item_id BIGINT UNSIGNED NULL,
+  machine_reference VARCHAR(160) NULL,
+  employee_reference VARCHAR(160) NULL,
+  operation_reference VARCHAR(160) NULL,
+  remarks VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tooling_stock_movement_id),
+  UNIQUE KEY uq_tooling_grn_receipt_line (tenant_id,grn_item_id,movement_type),
+  KEY ix_tooling_movement_item (tenant_id,item_id,movement_date),
+  KEY ix_tooling_movement_batch (tenant_id,tooling_regrind_batch_id),
+  CONSTRAINT fk_tooling_movement_item FOREIGN KEY (item_id) REFERENCES item_master(item_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_tooling_movement_batch FOREIGN KEY (tooling_regrind_batch_id) REFERENCES tooling_regrind_batches(tooling_regrind_batch_id) ON DELETE SET NULL,
+  CONSTRAINT fk_tooling_movement_batch_item FOREIGN KEY (tooling_regrind_batch_item_id) REFERENCES tooling_regrind_batch_items(tooling_regrind_batch_item_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tooling_regrind_inspection_measurements (
+  tooling_regrind_inspection_measurement_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id VARCHAR(64) NOT NULL,
+  tooling_regrind_batch_item_id BIGINT UNSIGNED NOT NULL,
+  item_inspection_characteristic_id BIGINT UNSIGNED NULL,
+  sequence_number INT NOT NULL,
+  characteristic_name_snapshot VARCHAR(180) NOT NULL,
+  specified_dimension DECIMAL(18,4) NULL,
+  lsl DECIMAL(18,4) NULL,
+  usl DECIMAL(18,4) NULL,
+  actual_value VARCHAR(160) NOT NULL,
+  inspection_result ENUM('PASS','FAIL') NOT NULL,
+  remarks VARCHAR(1000) NULL,
+  created_by VARCHAR(50) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tooling_regrind_inspection_measurement_id),
+  UNIQUE KEY uq_tooling_regrind_measurement (tooling_regrind_batch_item_id,sequence_number),
+  CONSTRAINT fk_tooling_regrind_measurement_item FOREIGN KEY (tooling_regrind_batch_item_id) REFERENCES tooling_regrind_batch_items(tooling_regrind_batch_item_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Existing Tool item stock becomes the opening balance of the Tooling lifecycle.
+INSERT INTO tooling_stock_balance
+  (tenant_id,company_id,plant_id,item_id,warehouse_code,bin_location,stock_status,quantity_on_hand,created_by,updated_by)
+SELECT B.tenant_id,MAX(B.company_id),COALESCE(B.plant_id,''),B.item_id,B.warehouse_code,B.bin_location,'AVAILABLE',
+       SUM(B.quantity_on_hand),'SYSTEM','SYSTEM'
+  FROM inventory_stock_balance B
+  JOIN item_master I ON I.item_id=B.item_id
+  JOIN item_group_master G ON G.item_group_id=I.item_group_id AND G.group_code='TL'
+ WHERE B.stock_owner_type='COMPANY'
+   AND B.quantity_on_hand<>0
+   AND B.warehouse_code IN ('Tool Crib','Production Stores')
+ GROUP BY B.tenant_id,COALESCE(B.plant_id,''),B.item_id,B.warehouse_code,B.bin_location
+ON DUPLICATE KEY UPDATE updated_by=VALUES(updated_by);
+
+-- Tool transfers are also written to the standard inventory ledger.
+ALTER TABLE inventory_stock_transaction
+  MODIFY COLUMN transaction_type VARCHAR(60) NOT NULL,
+  MODIFY COLUMN grn_id BIGINT UNSIGNED NULL,
+  MODIFY COLUMN grn_item_id BIGINT UNSIGNED NULL;
+
+INSERT INTO app_document_sequences (sequence_key,financial_year,prefix,current_number,number_padding)
+VALUES ('TOOL_REGRIND_DC','2026-27','TDC',0,4)
+ON DUPLICATE KEY UPDATE prefix=VALUES(prefix),number_padding=VALUES(number_padding);
+
+-- ============================================================================
+-- Tool return conditions
+-- Source: tooling-return-condition-migration.sql
+-- ============================================================================
+
+-- Adds direct return dispositions for tools issued to production.
+-- Safe to run after tooling-lifecycle-migration.sql on an existing database.
+
+ALTER TABLE tooling_stock_movements
+  MODIFY COLUMN movement_type ENUM(
+    'GRN_RECEIPT','ISSUE_TO_PRODUCTION','RETURN_FROM_PRODUCTION',
+    'RETURN_DAMAGED_REGRIND','RETURN_LOST','RETURN_SCRAP',
+    'REGRIND_DISPATCH','REGRIND_RECEIPT','REGRIND_ACCEPTED',
+    'REGRIND_REJECTED_SCRAP','REGRIND_REJECTED_REPEAT','REGRIND_REJECTED_RETURN'
+  ) NOT NULL;
+
+-- ============================================================================
+-- Tooling GRN Outward dispatch and Tool Return GRN Inward
+-- Source: tooling-grn-outward-return-migration.sql
+-- ============================================================================
+
+-- Links tooling regrinding DCs to GRN Outward and records the GRN Inward return.
+
+ALTER TABLE tooling_regrind_batches
+  ADD COLUMN material_outward_document_id BIGINT UNSIGNED NULL AFTER dispatch_bin_location,
+  ADD COLUMN return_grn_number VARCHAR(80) NULL AFTER material_outward_document_id,
+  ADD COLUMN return_gate_entry_id BIGINT UNSIGNED NULL AFTER return_grn_number,
+  ADD UNIQUE KEY uq_tooling_regrind_return_grn (tenant_id,return_grn_number),
+  ADD KEY ix_tooling_regrind_outward_document (material_outward_document_id),
+  ADD KEY ix_tooling_regrind_return_gate (return_gate_entry_id);
+
+-- ============================================================================
+-- Item Master UOM and Raw Material category cleanup
+-- Source: item-master-uom-rm-category-cleanup-migration.sql
+-- ============================================================================
+
+-- Keep one kilogram UOM and retire obsolete Raw Material categories.
+-- Historical items remain intact; their UOM references are normalized to KG.
+START TRANSACTION;
+
+INSERT INTO uom_master (uom_code,uom_name,active_flag,created_by)
+VALUES ('KG','Kilogram','Y','SYSTEM')
+ON DUPLICATE KEY UPDATE uom_name=VALUES(uom_name),active_flag='Y';
+
+SET @kg_uom_id := (
+  SELECT uom_id
+  FROM uom_master
+  WHERE UPPER(TRIM(uom_code))='KG'
+  ORDER BY uom_id
+  LIMIT 1
+);
+
+UPDATE item_master I
+JOIN uom_master U ON U.uom_id=I.uom_id
+SET I.uom_id=@kg_uom_id
+WHERE @kg_uom_id IS NOT NULL
+  AND UPPER(TRIM(U.uom_code))='KGS';
+
+UPDATE item_specification_value V
+JOIN uom_master U ON U.uom_id=V.uom_id
+SET V.uom_id=@kg_uom_id
+WHERE @kg_uom_id IS NOT NULL
+  AND UPPER(TRIM(U.uom_code))='KGS';
+
+UPDATE uom_master
+SET active_flag='N'
+WHERE UPPER(TRIM(uom_code))='KGS';
+
+-- Do not delete legacy categories that may be linked to existing items.
+UPDATE item_type_master T
+JOIN item_group_master G ON G.item_group_id=T.item_group_id
+SET T.active_flag='N',T.updated_by='SYSTEM'
+WHERE G.group_code='RM'
+  AND UPPER(TRIM(T.type_name)) IN (
+    'ROUND BAR','SQUARE BAR','SQUARE ROD','PROFILE','TERMINAL','POWDER','EXTRUSION'
+  );
 
 COMMIT;
 

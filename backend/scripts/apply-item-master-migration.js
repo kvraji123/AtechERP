@@ -15,7 +15,8 @@ const purchasedCategories = await fs.readFile(new URL("../database/purchased-ite
 const customerSuppliedCategory = await fs.readFile(new URL("../database/customer-supplied-item-category-migration.sql", import.meta.url), "utf8");
 const furnitureItemType = await fs.readFile(new URL("../database/furniture-item-type-migration.sql", import.meta.url), "utf8");
 const typeSpecifications = await fs.readFile(new URL("../database/item-master-type-specifications-migration.sql", import.meta.url), "utf8");
-const sql = `${schema}\n${cleanup}\n${shelfLife}\n${purchasedItems}\n${categoryCleanup}\n${packingSize}\n${fixtures}\n${rodType}\n${rodLengthRemoval}\n${purchasedCategories}\n${customerSuppliedCategory}\n${furnitureItemType}\n${typeSpecifications}`;
+const inspectionDefault = await fs.readFile(new URL("../database/item-master-inspection-required-default-yes-migration.sql", import.meta.url), "utf8");
+const sql = `${schema}\n${cleanup}\n${shelfLife}\n${purchasedItems}\n${categoryCleanup}\n${packingSize}\n${fixtures}\n${rodType}\n${rodLengthRemoval}\n${purchasedCategories}\n${customerSuppliedCategory}\n${furnitureItemType}\n${typeSpecifications}\n${inspectionDefault}`;
 
 const connection = await mysql.createConnection({
   host: env.db.host,

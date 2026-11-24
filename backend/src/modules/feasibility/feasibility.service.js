@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { env } from "../../config/env.js";
-import { withTransaction } from "../../config/db.js";
+import { db } from "../../config/db.js";
 import { AppError } from "../../utils/AppError.js";
+import * as enquiryRepository from "../enquiry/enquiry.repository.js";
+import { findMarketingDatabaseByEnquiryPartId } from "../marketing/marketing-database.js";
 import * as repository from "./feasibility.repository.js";
 import { APP_TIME_ZONE, todayInAppTimeZone } from "../../utils/dateTime.js";
 
@@ -32,7 +34,6 @@ function normalized(data, submit) {
     communicationAddress: clean(data.communicationAddress),
     contactPerson: clean(data.contactPerson, 200),
     telephoneNumber: clean(data.telephoneNumber, 50),
-    faxNumber: clean(data.faxNumber, 50),
     emailAddress: clean(data.emailAddress, 200),
     isNewCustomer: yesNo(data.isNewCustomer),
     existingProductsDetails: clean(data.existingProductsDetails),
@@ -66,7 +67,7 @@ function normalized(data, submit) {
     transportationMode: clean(data.transportationMode, 100),
     customerSpecifiedTransporter: yesNo(data.customerSpecifiedTransporter),
     transporterDetails: clean(data.transporterDetails),
-    freightPaidBy: ["BY_COMPANY", "BY_CUSTOMER", "NOT_APPLICABLE"].includes(data.freightPaidBy)
+    freightPaidBy: ["BY_COMPANY", "BY_CUSTOMER"].includes(data.freightPaidBy)
       ? data.freightPaidBy
       : null,
     paymentTerms: clean(data.paymentTerms),
@@ -135,12 +136,6 @@ function validate(data, submit, { isLabourOrder = false } = {}) {
   if (data.feasibilityDecision === "FEASIBLE") {
     if (data.productTechnicallyFeasible === "NO") {
       throw new AppError("A technically infeasible product cannot be closed as FEASIBLE.");
-    }
-    if (
-      [data.toleranceAchievable, data.acceptanceCriteriaUnderstood].includes("NO") &&
-      !data.finalRemarks?.trim()
-    ) {
-      throw new AppError("Record the authorized clarification or deviation in Final Remarks before feasible closure.");
     }
   }
   if (data.feasibilityDecision === "NOT_FEASIBLE") {
@@ -235,8 +230,8 @@ function buildRegretLetter(part, feasibility) {
 <p class="signature">For A Tech Automation Pvt. Ltd.<br><strong>${escapeHtml(feasibility.closed_by_name || feasibility.closed_by_code)}</strong><br>${escapeHtml(feasibility.closed_by_role || "Authorized Approver")}</p></body></html>`;
 }
 
-async function loadContext(enquiryPartId, connection) {
-  const part = await repository.getPart(enquiryPartId, connection);
+async function loadContext(enquiryPartId, connection, masterConnection = connection) {
+  const part = await repository.getPart(enquiryPartId, connection, masterConnection);
   if (!part) throw new AppError("Enquiry part not found.", 404);
   if (part.enquiry_save_status !== "SUBMITTED") {
     throw new AppError("Submit the enquiry before starting feasibility review.", 409);
@@ -247,10 +242,11 @@ async function loadContext(enquiryPartId, connection) {
 }
 
 export async function getFeasibility(enquiryPartId, user) {
-  const { part, feasibility, regretLetter } = await loadContext(enquiryPartId);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  const { part, feasibility, regretLetter } = await loadContext(enquiryPartId, marketingDatabase.pool, db);
   const [items, references] = await Promise.all([
-    repository.getEnquiryParts(part.enquiry_id),
-    repository.getReferenceValues(),
+    repository.getEnquiryParts(part.enquiry_id, marketingDatabase.pool),
+    repository.getReferenceValues(db),
   ]);
   return {
     part,
@@ -266,8 +262,9 @@ export async function saveFeasibility(enquiryPartId, data, user, submit = false)
   if (submit) {
     requirePermission(user, "CLOSE_FEASIBILITY", "You do not have permission to close feasibility.");
   }
-  return withTransaction(async (connection) => {
-    const { part, feasibility: existing } = await loadContext(enquiryPartId, connection);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  return marketingDatabase.withTransaction(async (connection) => {
+    const { part, feasibility: existing } = await loadContext(enquiryPartId, connection, db);
     const updatingClosed = existing?.save_status === "CLOSED";
     if (updatingClosed && !hasPermission(user, "EDIT_ENQUIRY_ALL_STAGES")) {
       throw new AppError("Closed feasibility cannot be edited.", 409);
@@ -294,14 +291,32 @@ export async function saveFeasibility(enquiryPartId, data, user, submit = false)
         { code: user.userCode, name: user.employeeName, role: user.role }
       );
     }
-    return repository.getFeasibility(enquiryPartId, connection);
+    const savedFeasibility = await repository.getFeasibility(enquiryPartId, connection);
+    await enquiryRepository.appendEnquiryRevision(connection, {
+      enquiryId: part.enquiry_id,
+      revisionAction: submit ? "FEASIBILITY_CLOSED" : "FEASIBILITY_SAVED",
+      saveStatus: part.enquiry_save_status,
+      snapshot: {
+        stage: "FEASIBILITY",
+        enquiryPartId: Number(enquiryPartId),
+        part: {
+          partNumber: part.part_number,
+          drawingNumber: part.drawing_number,
+          drawingRevisionNumber: part.drawing_revision_number,
+        },
+        feasibility: savedFeasibility,
+      },
+      userCode: user.userCode,
+    });
+    return savedFeasibility;
   });
 }
 
 export async function generateRegretLetter(enquiryPartId, user) {
   requirePermission(user, "GENERATE_REGRET_LETTER", "You do not have permission to generate regret letters.");
-  return withTransaction(async (connection) => {
-    const { part, feasibility, regretLetter } = await loadContext(enquiryPartId, connection);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  return marketingDatabase.withTransaction(async (connection) => {
+    const { part, feasibility, regretLetter } = await loadContext(enquiryPartId, connection, db);
     if (!feasibility || feasibility.save_status !== "CLOSED" || feasibility.feasibility_decision !== "NOT_FEASIBLE") {
       throw new AppError("Regret letter is available only for a closed NOT_FEASIBLE review.", 409);
     }
@@ -328,7 +343,8 @@ export async function generateRegretLetter(enquiryPartId, user) {
 }
 
 export async function previewRegretLetter(enquiryPartId) {
-  const { feasibility, regretLetter } = await loadContext(enquiryPartId);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  const { feasibility, regretLetter } = await loadContext(enquiryPartId, marketingDatabase.pool, db);
   if (!feasibility || !regretLetter?.letter_content) {
     throw new AppError("Generate the regret letter before previewing it.", 409);
   }
@@ -341,8 +357,9 @@ export async function previewRegretLetter(enquiryPartId) {
 
 export async function approveRegretLetter(enquiryPartId, user) {
   requirePermission(user, "APPROVE_REGRET_LETTER", "You do not have permission to approve regret letters.");
-  return withTransaction(async (connection) => {
-    const { feasibility, regretLetter } = await loadContext(enquiryPartId, connection);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  return marketingDatabase.withTransaction(async (connection) => {
+    const { feasibility, regretLetter } = await loadContext(enquiryPartId, connection, db);
     if (!feasibility || regretLetter?.letter_status !== "DRAFTED") {
       throw new AppError("Only a drafted regret letter can be approved.", 409);
     }
@@ -353,8 +370,9 @@ export async function approveRegretLetter(enquiryPartId, user) {
 
 export async function markRegretLetterSent(enquiryPartId, user) {
   requirePermission(user, "SEND_REGRET_LETTER", "You do not have permission to mark regret letters as sent.");
-  return withTransaction(async (connection) => {
-    const { feasibility, regretLetter } = await loadContext(enquiryPartId, connection);
+  const marketingDatabase = await findMarketingDatabaseByEnquiryPartId(enquiryPartId);
+  return marketingDatabase.withTransaction(async (connection) => {
+    const { feasibility, regretLetter } = await loadContext(enquiryPartId, connection, db);
     if (!feasibility || regretLetter?.letter_status !== "APPROVED") {
       throw new AppError("Approve the regret letter before marking it as sent.", 409);
     }

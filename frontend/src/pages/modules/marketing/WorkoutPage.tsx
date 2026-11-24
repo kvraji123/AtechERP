@@ -16,7 +16,13 @@ import { useAuth } from "../../../context/AuthContext";
 import { hasPermission, Permissions } from "../../../utils/permissions";
 import { todayInAppTimeZone } from "../../../utils/formatDateTime";
 
-type ProcessLine = { processType: string; description: string; costInr: number | string };
+type ProcessLine = {
+  processType: string;
+  description: string;
+  costInr: number | string;
+  totalCycleTimeSeconds?: number | string;
+  machineCostInr?: number | string;
+};
 type SubpartProcessColumn = { processType: string };
 type SubPartLine = {
   partName: string;
@@ -36,18 +42,35 @@ type SubPartLine = {
 
 const SUBPART_MACHINE_COST = "MACHINE_PROCESS_COST";
 const CUSTOM_SUBPART_PROCESS_PREFIX = "CUSTOM_";
+const MACHINE_RATE_PROCESS_TYPES = new Set(["VMC", "HMC", "TURNING"]);
 const isCustomSubpartProcess = (processType: string) => processType.startsWith(CUSTOM_SUBPART_PROCESS_PREFIX);
 const isPurchasedSubpart = (materialType: string) => String(materialType || "").toUpperCase() === "PURCHASE";
+const normalizedProcessType = (value: unknown) => String(value || "").trim().toUpperCase();
+const usesMachineRateCalculation = (processType: unknown) =>
+  MACHINE_RATE_PROCESS_TYPES.has(normalizedProcessType(processType));
+const subpartUsesMachineRateCalculation = (
+  machiningProcesses: any[],
+  processType: unknown,
+  description: unknown
+) => {
+  if (usesMachineRateCalculation(processType)) return true;
+  const processName = normalizedProcessType(description);
+  const matchedProcess = machiningProcesses.find((process: any) =>
+    normalizedProcessType(process.value) === processName ||
+    normalizedProcessType(process.label) === processName
+  );
+  return usesMachineRateCalculation(matchedProcess?.value);
+};
 
 const today = todayInAppTimeZone;
 const initialForm = {
   workoutDate: today(), processPlanId:"", currencyCode: "EUR", currencyRate: "", exchangeRateEffectiveDate: "",
-  moq: "", weightKg: "", materialRatePerKg: "", additionalMaterialCostInr: "",
+  moq: "", weightKg: "", materialRatePerKg: "", additionalMaterialCostInr: "", actualMaterialCostInr: "",
   assemblyLabourCostInr: "",
   overheadPercent: "", profitCalculationType: "FIXED_AMOUNT", profitValue: "",
   packingForwardingCostInr: "", commissionPercent: "",
   patternCostInr: "", fixtureCostInr: "", specialToolCostInr: "",
-  gaugeCostInr: "", trialCostInr: "", sampleCostInr: "", paymentTerms: "", developmentTime: "",
+  gaugeCostInr: "", trialCostInr: "", sampleCostPercent: "", sampleCostInr: "", paymentTerms: "", developmentTime: "",
   pilotBatchDelivery: "", notesText: "",
   processCosts: [] as ProcessLine[], save_status: "DRAFT",
   subparts: [] as SubPartLine[],
@@ -57,6 +80,24 @@ const num = (value: unknown) => Number(value || 0);
 const blankZero = (value: number | string | null | undefined) => num(value) === 0 ? "" : value ?? "";
 const money = (value: number) => Number(value.toFixed(2));
 const converted = (value: number, exchangeRate: number) => exchangeRate > 0 ? Number((value / exchangeRate).toFixed(4)) : 0;
+const hasEnteredNumber = (value: unknown) => String(value ?? "").trim() !== "";
+const configuredMachineCostForProcess = (machiningProcesses: any[], ...values: unknown[]) => {
+  const processKeys = values
+    .map((value) => String(value || "").trim().toUpperCase())
+    .filter(Boolean);
+  const process = machiningProcesses.find((item: any) =>
+    processKeys.includes(String(item.value || "").trim().toUpperCase()) ||
+    processKeys.includes(String(item.label || "").trim().toUpperCase())
+  );
+  return process && hasEnteredNumber(process.machineCostInr)
+    ? num(process.machineCostInr)
+    : null;
+};
+const calculatedMachineProcessCost = (cycleTimeSeconds: unknown, machineCostInr: number | string | null) => (
+  !hasEnteredNumber(cycleTimeSeconds) || !hasEnteredNumber(machineCostInr)
+    ? ""
+    : money(num(cycleTimeSeconds) * num(machineCostInr) / 3600)
+);
 const calculatedSubpartMaterialCost = (line: SubPartLine) => isPurchasedSubpart(line.materialType)
   ? money(num(line.materialPricePerKg) * num(line.rmWeightKg))
   : money(num(line.materialCostInr));
@@ -135,7 +176,15 @@ export default function WorkoutPage() {
           exchangeRateEffectiveDate: defaultCurrency?.effectiveDate || "",
           moq: blankZero(data.part.moq),
           paymentTerms: data.part.feasibility_payment_terms || "",
-          processCosts: (data.masters?.machiningProcesses || []).filter((item: any) => item.value !== "OTHER").map((item: any) => ({ processType: item.value, description: "", costInr: "" })),
+          processCosts: (data.masters?.machiningProcesses || []).filter((item: any) => item.value !== "OTHER").map((item: any) => ({
+            processType: item.value,
+            description: "",
+            totalCycleTimeSeconds: "",
+            machineCostInr: usesMachineRateCalculation(item.value)
+              ? configuredMachineCostForProcess(data.masters?.machiningProcesses || [], item.value, item.label) ?? ""
+              : "",
+            costInr: "",
+          })),
         });
         return;
       }
@@ -152,6 +201,7 @@ export default function WorkoutPage() {
           .map((process) => process.description || processLabels.get(process.processType) || (process.processType === SUBPART_MACHINE_COST ? "" : process.processType))
           .filter(Boolean)
           .join(", ");
+        const genericProcess = genericProcesses.length === 1 ? genericProcesses[0] : undefined;
         return {
           partName: line.partName || "",
           partDrawingNumber: line.partDrawingNumber || "",
@@ -166,8 +216,27 @@ export default function WorkoutPage() {
           gaugeCostInr: purchasedSubpart ? "" : blankZero(line.gaugeCostInr),
           trialCostInr: purchasedSubpart ? "" : blankZero(line.trialCostInr),
           processCosts: [
-            ...(genericProcesses.length ? [{ processType: SUBPART_MACHINE_COST, description: genericProcessName, costInr: blankZero(genericMachiningCost) }] : []),
-            ...customProcesses.map((process) => ({ ...process, costInr: blankZero(process.costInr) })),
+            ...(genericProcesses.length ? [{
+              processType: SUBPART_MACHINE_COST,
+              description: genericProcessName,
+              totalCycleTimeSeconds: subpartUsesMachineRateCalculation(data.masters?.machiningProcesses || [], genericProcess?.processType, genericProcessName)
+                ? blankZero(genericProcess?.totalCycleTimeSeconds)
+                : "",
+              machineCostInr: subpartUsesMachineRateCalculation(data.masters?.machiningProcesses || [], genericProcess?.processType, genericProcessName)
+                ? genericProcess?.machineCostInr ?? configuredMachineCostForProcess(data.masters?.machiningProcesses || [], genericProcess?.description, genericProcess?.processType) ?? ""
+                : "",
+              costInr: blankZero(genericMachiningCost),
+            }] : []),
+            ...customProcesses.map((process) => ({
+              ...process,
+              totalCycleTimeSeconds: subpartUsesMachineRateCalculation(data.masters?.machiningProcesses || [], process.processType, process.description)
+                ? blankZero(process.totalCycleTimeSeconds)
+                : "",
+              machineCostInr: subpartUsesMachineRateCalculation(data.masters?.machiningProcesses || [], process.processType, process.description)
+                ? process.machineCostInr ?? configuredMachineCostForProcess(data.masters?.machiningProcesses || [], process.description, process.processType) ?? ""
+                : "",
+              costInr: blankZero(process.costInr),
+            })),
           ],
         };
       });
@@ -179,17 +248,26 @@ export default function WorkoutPage() {
         workoutDate: workout.workout_date || today(), processPlanId:String(workout.process_plan_id || ""), currencyCode: workout.currency_code,
         currencyRate: workout.currency_rate, exchangeRateEffectiveDate: workout.exchange_rate_effective_date || "",
         moq: blankZero(workout.moq), weightKg: blankZero(workout.weight_kg),
-        materialRatePerKg: blankZero(workout.material_rate_per_kg), additionalMaterialCostInr: blankZero(workout.additional_material_cost_inr),
+        materialRatePerKg: blankZero(workout.material_rate_per_kg), additionalMaterialCostInr: blankZero(workout.additional_material_cost_inr), actualMaterialCostInr: blankZero(workout.actual_material_cost_inr),
         assemblyLabourCostInr: blankZero(workout.assembly_labour_cost_inr),
         overheadPercent: blankZero(workout.overhead_profit_percent),
         profitCalculationType: workout.profit_calculation_type || "FIXED_AMOUNT", profitValue: blankZero(workout.profit_value),
         packingForwardingCostInr: blankZero(workout.packing_forwarding_cost_inr), commissionPercent: blankZero(workout.commission_percent),
         patternCostInr: blankZero(workout.pattern_cost_inr), fixtureCostInr: blankZero(workout.fixture_cost_inr),
         specialToolCostInr: blankZero(workout.special_tool_cost_inr), gaugeCostInr: blankZero(workout.gauge_cost_inr),
-        trialCostInr: blankZero(workout.trial_cost_inr), sampleCostInr: blankZero(workout.sample_cost_inr), paymentTerms: data.part.feasibility_payment_terms || workout.payment_terms || "",
+        trialCostInr: blankZero(workout.trial_cost_inr), sampleCostPercent: blankZero(workout.sample_cost_percent), sampleCostInr: blankZero(workout.sample_cost_inr), paymentTerms: data.part.feasibility_payment_terms || workout.payment_terms || "",
         developmentTime: workout.development_time || "", pilotBatchDelivery: workout.pilot_batch_delivery || "",
         notesText: (workout.notes || []).map((note: any) => note.noteText).join("\n"),
-        processCosts: (workout.processCosts || []).map((process: ProcessLine) => ({ ...process, costInr: blankZero(process.costInr) })), save_status: workout.save_status,
+        processCosts: (workout.processCosts || []).map((process: ProcessLine) => ({
+          ...process,
+          totalCycleTimeSeconds: usesMachineRateCalculation(process.processType)
+            ? blankZero(process.totalCycleTimeSeconds)
+            : "",
+          machineCostInr: usesMachineRateCalculation(process.processType)
+            ? process.machineCostInr ?? configuredMachineCostForProcess(data.masters?.machiningProcesses || [], process.processType, process.description) ?? ""
+            : "",
+          costInr: blankZero(process.costInr),
+        })), save_status: workout.save_status,
         subparts: loadedSubparts,
       });
     }).catch((error) => setMessage({ type: "error", text: apiMessage(error) }));
@@ -226,9 +304,17 @@ export default function WorkoutPage() {
       gauge: money((form.subparts || []).reduce((sum: number, line: SubPartLine) => sum + num(line.gaugeCostInr), 0)),
       trial: money((form.subparts || []).reduce((sum: number, line: SubPartLine) => sum + num(line.trialCostInr), 0)),
     };
+    const calculatedMaterialCost = money(
+      num(form.weightKg) * num(form.materialRatePerKg) + num(form.additionalMaterialCostInr)
+    );
+    // A blank editable cost continues to use the rate-and-weight calculation.
+    // Once a cost is entered, it is the quoted material cost and must flow through
+    // every downstream price total.
     const materialCost = isAssembled
       ? subpartMaterialCost
-      : money(num(form.weightKg) * num(form.materialRatePerKg) + num(form.additionalMaterialCostInr));
+      : hasEnteredNumber(form.actualMaterialCostInr)
+        ? money(num(form.actualMaterialCostInr))
+        : calculatedMaterialCost;
     const mainMachiningTotal = money((form.processCosts || []).reduce((sum: number, line: ProcessLine) => sum + num(line.costInr), 0));
     const machiningTotal = isAssembled
       ? money(subpartMachiningCost + num(form.assemblyLabourCostInr))
@@ -240,6 +326,7 @@ export default function WorkoutPage() {
     const partPrice = money(materialCost + adjustedMachining + num(form.packingForwardingCostInr));
     const commissionAmount = money(partPrice * num(form.commissionPercent) / 100);
     const finalPartPrice = money(partPrice + commissionAmount);
+    const sampleCostInr = money(finalPartPrice * (1 + num(form.sampleCostPercent) / 100));
     const developmentTotal = isAssembled
       ? subpartDevelopmentCost
       : money(["patternCostInr", "fixtureCostInr", "specialToolCostInr", "gaugeCostInr", "trialCostInr"].reduce((sum, key) => sum + num(form[key]), 0));
@@ -253,7 +340,9 @@ export default function WorkoutPage() {
       partPrice,
       commissionAmount,
       finalPartPrice,
+      sampleCostInr,
       developmentTotal,
+      calculatedMaterialCost,
       subpartMaterialCost,
       subpartMachiningCost,
       subpartDevelopmentCost,
@@ -266,13 +355,63 @@ export default function WorkoutPage() {
     ...current,
     processCosts: current.processCosts.map((line: ProcessLine, lineIndex: number) => lineIndex === index ? { ...line, [key]: value } : line),
   }));
-  const updateProcessCost = (index: number, value: string) => {
+  const updateMainProcessType = (index: number, processType: string) => setForm((current: any) => ({
+    ...current,
+    processCosts: current.processCosts.map((line: ProcessLine, lineIndex: number) => {
+      if (lineIndex !== index) return line;
+      const calculatedByMachineRate = usesMachineRateCalculation(processType);
+      const machineCostInr = calculatedByMachineRate
+        ? configuredMachineCostForProcess(masters.machiningProcesses || [], processType)
+        : "";
+      return {
+        ...line,
+        processType,
+        totalCycleTimeSeconds: calculatedByMachineRate ? line.totalCycleTimeSeconds : "",
+        machineCostInr: machineCostInr ?? "",
+        costInr: calculatedByMachineRate
+          ? calculatedMachineProcessCost(line.totalCycleTimeSeconds, machineCostInr)
+          : "",
+      };
+    }),
+  }));
+  const updateMainProcessCycleTime = (index: number, value: string) => {
     if (value !== "" && !/^\d*(?:\.\d*)?$/.test(value)) return;
-    updateProcess(index, "costInr", value);
+    setForm((current: any) => ({
+      ...current,
+      processCosts: current.processCosts.map((line: ProcessLine, lineIndex: number) => lineIndex === index && usesMachineRateCalculation(line.processType) ? {
+        ...line,
+        totalCycleTimeSeconds: value,
+        costInr: calculatedMachineProcessCost(value, line.machineCostInr ?? null),
+      } : line),
+    }));
+  };
+  const updateMainProcessMachineCost = (index: number, value: string) => {
+    if (value !== "" && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    setForm((current: any) => ({
+      ...current,
+      processCosts: current.processCosts.map((line: ProcessLine, lineIndex: number) => lineIndex === index && usesMachineRateCalculation(line.processType) ? {
+        ...line,
+        machineCostInr: value,
+        costInr: calculatedMachineProcessCost(line.totalCycleTimeSeconds, value),
+      } : line),
+    }));
+  };
+  const updateMainProcessCost = (index: number, value: string) => {
+    if (value !== "" && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    setForm((current: any) => ({
+      ...current,
+      processCosts: current.processCosts.map((line: ProcessLine, lineIndex: number) => lineIndex === index && !usesMachineRateCalculation(line.processType) ? {
+        ...line,
+        costInr: value,
+      } : line),
+    }));
   };
   const displayCost = (value: number | string) =>
     value === 0 ? "" : value;
-  const addProcess = () => setForm((current: any) => ({ ...current, processCosts: [...current.processCosts, { processType: "OTHER", description: "", costInr: "" }] }));
+  const addProcess = () => setForm((current: any) => ({
+    ...current,
+    processCosts: [...current.processCosts, { processType: "OTHER", description: "", totalCycleTimeSeconds: "", machineCostInr: "", costInr: "" }],
+  }));
   const removeProcess = async (index: number) => {
     const processLabel =
       form.processCosts[index]?.description ||
@@ -332,39 +471,116 @@ export default function WorkoutPage() {
   ]);
   const subpartProcessName = (line: SubPartLine, processType: string) =>
     line.processCosts.find((process) => process.processType === processType)?.description ?? "";
-  const subpartProcessCost = (line: SubPartLine, processType: string) =>
-    line.processCosts.find((process) => process.processType === processType)?.costInr ?? "";
+  const subpartProcessCycleTime = (line: SubPartLine, processType: string) =>
+    line.processCosts.find((process) => process.processType === processType)?.totalCycleTimeSeconds ?? "";
+  const subpartProcessMachineCost = (line: SubPartLine, processType: string) => {
+    const process = line.processCosts.find((item) => item.processType === processType);
+    if (!process || !subpartUsesMachineRateCalculation(masters.machiningProcesses || [], process.processType, process.description)) return null;
+    return process.machineCostInr ?? configuredMachineCostForProcess(masters.machiningProcesses || [], process.description, process.processType);
+  };
+  const subpartProcessCost = (line: SubPartLine, processType: string) => {
+    const process = line.processCosts.find((item) => item.processType === processType);
+    if (!process) return "";
+    if (!subpartUsesMachineRateCalculation(masters.machiningProcesses || [], process.processType, process.description)) {
+      return process.costInr ?? "";
+    }
+    const machineCost = subpartProcessMachineCost(line, processType);
+    const calculatedCost = calculatedMachineProcessCost(process.totalCycleTimeSeconds, machineCost);
+    return calculatedCost === "" ? process.costInr ?? "" : calculatedCost;
+  };
   const updateSubpartProcessName = (index: number, processType: string, description: string) => setForm((current: any) => ({
     ...current,
     subparts: current.subparts.map((line: SubPartLine, lineIndex: number) => {
       if (lineIndex !== index) return line;
       const existing = line.processCosts.find((process) => process.processType === processType);
+      const calculatedByMachineRate = subpartUsesMachineRateCalculation(masters.machiningProcesses || [], processType, description);
       if (!existing) {
-        return description ? { ...line, processCosts: [...line.processCosts, { processType, description, costInr: "" }] } : line;
+        const machineCostInr = calculatedByMachineRate
+          ? configuredMachineCostForProcess(masters.machiningProcesses || [], description)
+          : "";
+        return description ? {
+          ...line,
+          processCosts: [...line.processCosts, {
+            processType,
+            description,
+            totalCycleTimeSeconds: "",
+            machineCostInr: machineCostInr ?? "",
+            costInr: "",
+          }],
+        } : line;
       }
+      if (!description) {
+        return { ...line, processCosts: line.processCosts.filter((process) => process.processType !== processType) };
+      }
+      const machineCostInr = calculatedByMachineRate
+        ? configuredMachineCostForProcess(masters.machiningProcesses || [], description)
+        : "";
+      const costInr = calculatedByMachineRate
+        ? calculatedMachineProcessCost(existing.totalCycleTimeSeconds, machineCostInr)
+        : "";
       return {
         ...line,
-        processCosts: !description && !existing.costInr
-          ? line.processCosts.filter((process) => process.processType !== processType)
-          : line.processCosts.map((process) => process.processType === processType ? { ...process, description } : process),
+        processCosts: line.processCosts.map((process) => process.processType === processType ? {
+          ...process,
+          description,
+          totalCycleTimeSeconds: calculatedByMachineRate ? process.totalCycleTimeSeconds : "",
+          machineCostInr: machineCostInr ?? "",
+          costInr: costInr === "" ? "" : costInr,
+        } : process),
       };
     }),
   }));
-  const updateSubpartProcessCost = (index: number, processType: string, value: string) => {
+  const updateSubpartProcessCycleTime = (index: number, processType: string, value: string) => {
     if (value !== "" && !/^\d*(?:\.\d*)?$/.test(value)) return;
     setForm((current: any) => ({
       ...current,
       subparts: current.subparts.map((line: SubPartLine, lineIndex: number) => {
         if (lineIndex !== index) return line;
         const existing = line.processCosts.find((process) => process.processType === processType);
-        if (!existing) {
-          return value ? { ...line, processCosts: [...line.processCosts, { processType, description: "", costInr: value }] } : line;
-        }
+        if (!existing || !subpartUsesMachineRateCalculation(masters.machiningProcesses || [], existing.processType, existing.description)) return line;
+        const machineCostInr = subpartProcessMachineCost(line, processType);
         return {
           ...line,
-          processCosts: value === "" && !existing.description
-            ? line.processCosts.filter((process) => process.processType !== processType)
-            : line.processCosts.map((process) => process.processType === processType ? { ...process, costInr: value } : process),
+          processCosts: line.processCosts.map((process) => process.processType === processType ? {
+            ...process,
+            totalCycleTimeSeconds: value,
+            costInr: calculatedMachineProcessCost(value, machineCostInr),
+          } : process),
+        };
+      }),
+    }));
+  };
+  const updateSubpartProcessMachineCost = (index: number, processType: string, value: string) => {
+    if (value !== "" && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    setForm((current: any) => ({
+      ...current,
+      subparts: current.subparts.map((line: SubPartLine, lineIndex: number) => {
+        if (lineIndex !== index) return line;
+        const existing = line.processCosts.find((process) => process.processType === processType);
+        if (!existing || !subpartUsesMachineRateCalculation(masters.machiningProcesses || [], existing.processType, existing.description)) return line;
+        return {
+          ...line,
+          processCosts: line.processCosts.map((process) => process.processType === processType ? {
+            ...process,
+            machineCostInr: value,
+            costInr: calculatedMachineProcessCost(process.totalCycleTimeSeconds, value),
+          } : process),
+        };
+      }),
+    }));
+  };
+  const updateSubpartProcessCost = (index: number, processType: string, value: string) => {
+    if (value !== "" && !/^\d*(?:\.\d*)?$/.test(value)) return;
+    setForm((current: any) => ({
+      ...current,
+      subparts: current.subparts.map((line: SubPartLine, lineIndex: number) => {
+        if (lineIndex !== index) return line;
+        return {
+          ...line,
+          processCosts: line.processCosts.map((process) => process.processType === processType && !subpartUsesMachineRateCalculation(masters.machiningProcesses || [], process.processType, process.description) ? {
+            ...process,
+            costInr: value,
+          } : process),
         };
       }),
     }));
@@ -380,7 +596,15 @@ export default function WorkoutPage() {
 
     try {
       setSaving(complete ? "COMPLETE" : "DRAFT"); setMessage(undefined);
-      const payload = { ...form, notes: String(form.notesText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean) };
+      const payload = {
+        ...form,
+        // Purchased sub-parts display a read-only calculated cost. Include that
+        // value in the request so the server stores the same value the user sees.
+        subparts: (form.subparts || []).map((line: SubPartLine) => isPurchasedSubpart(line.materialType)
+          ? { ...line, materialCostInr: calculatedSubpartMaterialCost(line) }
+          : line),
+        notes: String(form.notesText || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+      };
       const response = await marketingApi.saveWorkout(partId, payload, complete);
       unsaved.markSaved(savedSnapshot);
       if (stayOnPage) return true;
@@ -459,11 +683,10 @@ export default function WorkoutPage() {
   const allowedStages = (workflow?.allowedStages || ["Enquiry", "Feasibility", "Workout"]) as MarketingStage[];
   const completedStages = (workflow?.completedStages || ["Enquiry", "Feasibility"]) as MarketingStage[];
   const subpartProcessOptions = (masters.machiningProcesses || []).filter((process: any) => process.value !== "OTHER");
-  const inputNumber = (key: string, label: string, step = "0.01") => <label><span>{label}</span><input type="number" min="0" step={step} value={form[key]} disabled={closed} onChange={(event) => set(key, event.target.value)} /></label>;
+  const inputNumber = (key: string, label: string, step = "any") => <label><span>{label}</span><input type="number" inputMode="decimal" min="0" step={step} value={form[key]} disabled={closed} onChange={(event) => set(key, event.target.value)} /></label>;
 
   return <div className="page-container workout-page">
-    <PageHeader eyebrow="MARKETING / WORKOUT" title={part ? `Workout - ${part.part_number}` : "Workout"} actions={<>
-      {actions.includes("CANCEL") && <button type="button" className="workout-cancel" onClick={cancel}><X size={16}/>Cancel</button>}
+    <PageHeader eyebrow="MARKETING / WORKOUT" title={part ? `Workout - ${part.part_number}` : "Workout"} onClose={actions.includes("CANCEL") ? cancel : undefined} closeDisabled={saving !== null} closeLabel="Close Workout" actions={<>
       {(savedDraft || completed) && !draftEditing && canEditAllStages ? (
         <button type="button" className="primary-action-button" disabled={saving !== null} onClick={() => setDraftEditing(true)}><Pencil size={17}/>{completed ? "Edit Workout" : "Edit Draft"}</button>
       ) : !viewRequested && (!completed || draftEditing) ? <>
@@ -488,7 +711,7 @@ export default function WorkoutPage() {
         <label><span>Drawing / Item</span><select value={partId} disabled={closed} onChange={(event) => navigate(`/marketing/enquiry-parts/${event.target.value}/workout${modeSuffix}`)}>{items.map((item) => <option key={item.enquiryPartId} value={item.enquiryPartId}>{item.drawingNumber} - {item.productDescription}</option>)}</select></label>
         <label><span>Process Plan Variant</span><select value={form.processPlanId || ""} disabled={closed || !processPlans.length} onChange={(event) => set("processPlanId",event.target.value)}><option value="">{processPlans.length ? "Select Process Plan" : "No Process Plan configured"}</option>{processPlans.map((plan:any) => <option key={plan.processPlanId} value={plan.processPlanId}>{plan.planCode} - {plan.routeName} ({plan.productionCapacityPerDay || 0}/day){plan.isDefault === "Y" ? " - Default" : ""}</option>)}</select></label>
         <label><span>Enquiry Reference</span><input value={part?.doc_no || ""} readOnly/></label>
-        <label><span>Workout Date *</span><DateInput type="date" value={form.workoutDate} disabled={closed} onChange={(event) => set("workoutDate", event.target.value)}/></label>
+        <label><span>Workout Date *</span><DateInput type="date" value={form.workoutDate} max={today()} disabled={closed} onChange={(event) => set("workoutDate", event.target.value)}/></label>
         <label><span>Customer Reference</span><input value={part?.po_reference || "Not available"} readOnly/></label>
         <label><span>Item Code</span><input value={part?.item_code || "Not Assigned"} readOnly/></label>
         <label><span>Machining Drawing Number</span><input value={part?.drawing_number || ""} readOnly/></label>
@@ -507,11 +730,44 @@ export default function WorkoutPage() {
         <div className="workout-grid">
           <label><span>Quotation Currency *</span><select value={form.currencyCode} disabled={closed} onChange={(event) => selectCurrency(event.target.value)}>{masters.currencies.map((currency: any) => <option key={currency.value} value={currency.value}>{currency.value} - {currency.label}</option>)}</select></label>
           {inputNumber("currencyRate", `Exchange Rate (1 ${foreign} = INR) *`, "0.0001")}
-          <label><span>Rate Effective Date</span><DateInput type="date" value={form.exchangeRateEffectiveDate || ""} disabled={closed} onChange={(event) => set("exchangeRateEffectiveDate", event.target.value)}/></label>
+          <label><span>Rate Effective Date</span><DateInput type="date" value={form.exchangeRateEffectiveDate || ""} max={today()} disabled={closed} onChange={(event) => set("exchangeRateEffectiveDate", event.target.value)}/></label>
           {!isAssembled && inputNumber("materialRatePerKg", "Material Rate / Kg (INR) *")}
           {!isAssembled && inputNumber("additionalMaterialCostInr", "Additional Material Cost (INR)")}
         </div>
-        <div className="workout-result-row"><span>{isAssembled ? "Sub-Part Material Total" : "Material Cost"}</span><Amount value={totals.materialCost}/><Amount value={converted(totals.materialCost, totals.exchangeRate)} currency={foreign}/></div>
+        <div className="workout-material-cost-summary">
+          <div className="workout-result-row">
+            <span>{isAssembled ? "Sub-Part Material Total" : "Material Cost (INR)"}</span>
+            {isAssembled ? <Amount value={totals.materialCost}/> : <input
+              className="workout-material-cost-input"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.0001"
+              value={hasEnteredNumber(form.actualMaterialCostInr) ? form.actualMaterialCostInr : displayCost(totals.calculatedMaterialCost)}
+              disabled={closed}
+              aria-label="Material Cost in INR"
+              onChange={(event) => set("actualMaterialCostInr", event.target.value)}
+            />}
+            {isAssembled ? <Amount value={converted(totals.materialCost, totals.exchangeRate)} currency={foreign}/> : <label className="workout-foreign-material-cost-input">
+              <span>{foreign}</span>
+              <input
+                className="workout-material-cost-input"
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.0001"
+                value={converted(totals.materialCost, totals.exchangeRate)}
+                disabled={closed || totals.exchangeRate <= 0}
+                aria-label={`Material Cost in ${foreign}`}
+                onChange={(event) => {
+                  const foreignCost = event.target.value;
+                  set("actualMaterialCostInr", foreignCost === "" ? "" : String(money(num(foreignCost) * totals.exchangeRate)));
+                }}
+              />
+            </label>}
+          </div>
+          {!isAssembled && hasEnteredNumber(form.actualMaterialCostInr) && money(num(form.actualMaterialCostInr)) !== totals.calculatedMaterialCost && <p className="workout-material-cost-hint">Rate-based calculation: INR {totals.calculatedMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>}
+        </div>
       </section>
       <section className="workout-card">
         <div className="workout-section-title"><h2>{isAssembled ? "Assembly / Labour, Overhead & Profit" : "Overhead & Profit"}</h2></div>
@@ -546,7 +802,7 @@ export default function WorkoutPage() {
           <thead>
             <tr className="workout-subpart-groups">
               <th colSpan={7}>Sub-Part &amp; Material Details</th>
-              <th colSpan={subpartProcessColumns.length * 2}>
+              <th colSpan={subpartProcessColumns.length * 4}>
                 <span className="workout-machine-process-group">
                   <span>Machining Process Cost</span>
                   {!closed && <button type="button" className="workout-machine-process-add" onClick={addSubpartProcessColumn}><Plus size={15}/>Machine Process</button>}
@@ -563,7 +819,12 @@ export default function WorkoutPage() {
               <th>Unit Price</th>
               <th>RM Weight / Nos.</th>
               <th>Material Cost</th>
-              {subpartProcessColumns.map((column) => <Fragment key={column.processType}><th>Process Name</th><th>Machining Process Cost</th></Fragment>)}
+              {subpartProcessColumns.map((column) => <Fragment key={column.processType}>
+                <th>Process Name</th>
+                <th>Total Cycle Time (Sec)</th>
+                <th>Machine Cost / Hr</th>
+                <th>Machining Process Cost</th>
+              </Fragment>)}
               <th>Pattern</th>
               <th>Fixture</th>
               <th>Special Tool</th>
@@ -585,6 +846,12 @@ export default function WorkoutPage() {
                 <td><input type="number" min="0" step="0.01" value={purchasedSubpart ? displayCost(calculatedSubpartMaterialCost(line)) : line.materialCostInr} disabled={closed} readOnly={purchasedSubpart} aria-label={`Sub-part ${index + 1} material cost`} placeholder={purchasedSubpart ? "Calculated" : "Enter cost"} onChange={(event) => { if (!purchasedSubpart) updateSubpart(index, "materialCostInr", event.target.value); }}/></td>
                 {subpartProcessColumns.map((column) => {
                   const selectedProcessName = subpartProcessName(line, column.processType);
+                  const cycleTimeSeconds = subpartProcessCycleTime(line, column.processType);
+                  const machineCostInr = subpartProcessMachineCost(line, column.processType);
+                  const selectedProcess = line.processCosts.find((process) => process.processType === column.processType);
+                  const calculatedByMachineRate = selectedProcess
+                    ? subpartUsesMachineRateCalculation(masters.machiningProcesses || [], selectedProcess.processType, selectedProcess.description)
+                    : false;
                   const hasSavedCustomName = selectedProcessName && !subpartProcessOptions.some((process: any) => process.label === selectedProcessName);
                   return <Fragment key={column.processType}>
                     <td><select value={selectedProcessName} disabled={processAndDevelopmentDisabled} aria-label={`Sub-part ${index + 1} process name`} onChange={(event) => updateSubpartProcessName(index, column.processType, event.target.value)}>
@@ -592,7 +859,9 @@ export default function WorkoutPage() {
                       {hasSavedCustomName && <option value={selectedProcessName}>{selectedProcessName}</option>}
                       {subpartProcessOptions.map((process: any) => <option key={process.value} value={process.label}>{process.label}</option>)}
                     </select></td>
-                    <td><input type="text" inputMode="decimal" value={displayCost(subpartProcessCost(line, column.processType))} disabled={processAndDevelopmentDisabled} placeholder="Enter cost" onChange={(event) => updateSubpartProcessCost(index, column.processType, event.target.value)}/></td>
+                    <td><input type="number" inputMode="decimal" min="0" step="any" value={cycleTimeSeconds} disabled={processAndDevelopmentDisabled || !selectedProcessName || !calculatedByMachineRate} placeholder="Seconds" aria-label={`Sub-part ${index + 1} total cycle time in seconds`} onChange={(event) => updateSubpartProcessCycleTime(index, column.processType, event.target.value)}/></td>
+                    <td><input type="number" inputMode="decimal" min="0" step="any" value={machineCostInr ?? ""} disabled={processAndDevelopmentDisabled || !selectedProcessName || !calculatedByMachineRate} aria-label={`Sub-part ${index + 1} machine cost per hour`} onChange={(event) => updateSubpartProcessMachineCost(index, column.processType, event.target.value)}/></td>
+                    <td><input type="number" inputMode="decimal" min="0" step="any" value={displayCost(subpartProcessCost(line, column.processType))} disabled={processAndDevelopmentDisabled || !selectedProcessName} readOnly={calculatedByMachineRate} placeholder={calculatedByMachineRate ? "Calculated" : "Enter cost"} aria-label={`Sub-part ${index + 1} machining process cost`} onChange={(event) => updateSubpartProcessCost(index, column.processType, event.target.value)}/></td>
                   </Fragment>;
                 })}
                 <td><input type="number" min="0" step="0.01" value={line.patternCostInr} disabled={processAndDevelopmentDisabled} onChange={(event) => updateSubpart(index, "patternCostInr", event.target.value)}/></td>
@@ -603,13 +872,16 @@ export default function WorkoutPage() {
                 <td><button type="button" className="workout-subpart-delete" aria-label={`Delete sub-part row ${index + 1}`} disabled={closed} onClick={() => removeSubpart(index)}><Trash2 size={15}/></button></td>
               </tr>;
             })}
-            {!form.subparts.length && <tr><td className="workout-subpart-empty" colSpan={13 + subpartProcessColumns.length * 2}>No sub-parts added. Select Add Sub Part to create an editable row.</td></tr>}
+            {!form.subparts.length && <tr><td className="workout-subpart-empty" colSpan={13 + subpartProcessColumns.length * 4}>No sub-parts added. Select Add Sub Part to create an editable row.</td></tr>}
           </tbody>
           {!!form.subparts.length && <tfoot>
             <tr>
               <th colSpan={6}>Calculated Total</th>
               <th>{totals.subpartMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</th>
-              {subpartProcessColumns.map((column) => <Fragment key={column.processType}><th></th><th>{money((form.subparts || []).reduce((sum: number, line: SubPartLine) => sum + num(subpartProcessCost(line, column.processType)), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</th></Fragment>)}
+              {subpartProcessColumns.map((column) => <Fragment key={column.processType}>
+                <th></th><th></th><th></th>
+                <th>{money((form.subparts || []).reduce((sum: number, line: SubPartLine) => sum + num(subpartProcessCost(line, column.processType)), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</th>
+              </Fragment>)}
               {["patternCostInr", "fixtureCostInr", "specialToolCostInr", "gaugeCostInr", "trialCostInr"].map((key) => <th key={key}>{money((form.subparts || []).reduce((sum: number, line: SubPartLine) => sum + num((line as any)[key]), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</th>)}
               <th></th>
             </tr>
@@ -621,13 +893,18 @@ export default function WorkoutPage() {
     {!isAssembled && <section className="workout-card">
       <div className="workout-section-title"><h2>Machining Process Costs</h2>{!closed && <button type="button" className="workout-add-line" onClick={addProcess}><Plus size={15}/>Add Process</button>}</div>
       <div className="workout-process-table">
-        <div className="process-head"><span>Process</span><span>Description</span><span>Cost INR</span><span></span></div>
-        {form.processCosts.map((line: ProcessLine, index: number) => <div className="process-line" key={`${index}-${line.processType}`}>
-          <select value={line.processType} disabled={closed} onChange={(event) => updateProcess(index, "processType", event.target.value)}>{masters.machiningProcesses.map((process: any) => <option key={process.value} value={process.value}>{process.label}</option>)}</select>
-          <input value={line.description || ""} disabled={closed} placeholder={line.processType === "OTHER" ? "Enter process description" : "Optional description"} onChange={(event) => updateProcess(index, "description", event.target.value)}/>
-          <input type="text" inputMode="decimal" value={displayCost(line.costInr)} disabled={closed} placeholder="Enter cost" onChange={(event) => updateProcessCost(index, event.target.value)}/>
-          <button type="button" title="Remove process" disabled={closed} onClick={() => removeProcess(index)}><Trash2 size={16}/></button>
-        </div>)}
+        <div className="process-head"><span>Process</span><span>Description</span><span>Total Cycle Time (Sec)</span><span>Machine Cost / Hr (INR)</span><span>Machining Process Cost (INR)</span><span></span></div>
+        {form.processCosts.map((line: ProcessLine, index: number) => {
+          const calculatedByMachineRate = usesMachineRateCalculation(line.processType);
+          return <div className="process-line" key={`${index}-${line.processType}`}>
+            <select value={line.processType} disabled={closed} onChange={(event) => updateMainProcessType(index, event.target.value)}>{masters.machiningProcesses.map((process: any) => <option key={process.value} value={process.value}>{process.label}</option>)}</select>
+            <input value={line.description || ""} disabled={closed} placeholder={line.processType === "OTHER" ? "Enter process description" : "Optional description"} onChange={(event) => updateProcess(index, "description", event.target.value)}/>
+            <input type="number" inputMode="decimal" min="0" step="any" value={line.totalCycleTimeSeconds ?? ""} disabled={closed || !calculatedByMachineRate} placeholder="Seconds" aria-label={`Process ${index + 1} total cycle time in seconds`} onChange={(event) => updateMainProcessCycleTime(index, event.target.value)}/>
+            <input type="number" inputMode="decimal" min="0" step="any" value={line.machineCostInr ?? ""} disabled={closed || !calculatedByMachineRate} placeholder="Enter cost" aria-label={`Process ${index + 1} machine cost per hour`} onChange={(event) => updateMainProcessMachineCost(index, event.target.value)}/>
+            <input type="number" inputMode="decimal" min="0" step="any" value={displayCost(line.costInr)} disabled={closed} readOnly={calculatedByMachineRate} placeholder={calculatedByMachineRate ? "Calculated" : "Enter cost"} aria-label={`Process ${index + 1} machining process cost`} onChange={(event) => updateMainProcessCost(index, event.target.value)}/>
+            <button type="button" title="Remove process" disabled={closed} onClick={() => removeProcess(index)}><Trash2 size={16}/></button>
+          </div>;
+        })}
       </div>
     </section>}
 
@@ -640,7 +917,8 @@ export default function WorkoutPage() {
             <div className="workout-grid">
               {!isAssembled && inputNumber("packingForwardingCostInr", "Packing Cost (INR)")}
               {inputNumber("commissionPercent", "Commission Percentage")}
-              {inputNumber("sampleCostInr", "Sample Cost (INR)")}
+              {inputNumber("sampleCostPercent", "Sample Cost (%)")}
+              <label><span>Sample Cost ({foreign})</span><input type="number" inputMode="decimal" value={converted(totals.sampleCostInr, totals.exchangeRate)} readOnly/></label>
             </div>
           </div>
           <div className="workout-pricing-details"><h3>Cost Details</h3><div className="workout-price-grid"><span></span><strong>INR</strong><strong>{foreign}</strong><span>Packing Cost</span><Amount value={num(form.packingForwardingCostInr)}/><Amount value={converted(num(form.packingForwardingCostInr), totals.exchangeRate)} currency={foreign}/><span>{isAssembled ? "Assembled Item Price Before Commission" : "Part Price Before Commission"}</span><Amount value={totals.partPrice}/><Amount value={converted(totals.partPrice, totals.exchangeRate)} currency={foreign}/><span>Commission Amount</span><Amount value={totals.commissionAmount}/><Amount value={converted(totals.commissionAmount, totals.exchangeRate)} currency={foreign}/><span className="grand">{isAssembled ? "Final Assembled Item Price" : "Final Part Price"}</span><Amount value={totals.finalPartPrice}/><Amount value={converted(totals.finalPartPrice, totals.exchangeRate)} currency={foreign}/></div></div>

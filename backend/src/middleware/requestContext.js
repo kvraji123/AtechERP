@@ -1,57 +1,51 @@
-import { env } from "../config/env.js";
+import { env } from "../config/env.js"
+import { AppError } from "../utils/AppError.js";
+import { getAuthenticatedSession } from "../modules/auth/auth.service.js";
 
-export function requestContext(req, _res, next) {
-  const userCode = String(
-    req.headers["x-user-code"] ||
-    req.headers["x-employee-code"] ||
-    "SYSTEM"
-  ).trim();
+function readCookie(req, cookieName) {
+  const cookieHeader = String(req.headers.cookie || "");
+  for (const item of cookieHeader.split(";")) {
+    const separator = item.indexOf("=");
+    if (separator < 0) continue;
+    const name = item.slice(0, separator).trim();
+    if (name !== cookieName) continue;
+    try {
+      return decodeURIComponent(item.slice(separator + 1).trim());
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
 
-  const suppliedPermissions = String(
-    req.headers["x-user-permissions"] || ""
-  )
-    .split(",")
-    .map((permission) => permission.trim().toUpperCase())
-    .filter(Boolean);
+export function sessionTokenFromRequest(req) {
+  return readCookie(req, "atech_session");
+}
 
-  const administratorPermissions = [
-    "EDIT_ENQUIRY_ALL_STAGES",
-    "CLOSE_FEASIBILITY",
-    "GENERATE_REGRET_LETTER",
-    "APPROVE_REGRET_LETTER",
-    "SEND_REGRET_LETTER",
-    "COMPLETE_WORKOUT",
-    "CREATE_QUOTATION",
-    "FINALIZE_QUOTATION",
-    "GENERATE_QUOTATION_PDF",
-    "SEND_QUOTATION_EMAIL",
-  ];
+export async function requestContext(req, _res, next) {
+  if (req.method === "OPTIONS" || (req.path === "/health" && req.method === "GET")) {
+    return next();
+  }
 
-  const role = String(
-    req.headers["x-user-role"] ||
-    (userCode === "SYSTEM" ? "Administrator" : "User")
-  ).trim();
+  if (req.path === "/api/v1/auth/login" && req.method === "POST") {
+    return next();
+  }
 
-  const roleKey = role.toUpperCase().replace(/\s+/g, "_");
-  const purchasePermissions = [
-    "PR_CREATE", "PR_SUBMIT", "PR_APPROVE", "RFQ_CREATE", "QUOTE_ENTER",
-    "SUPPLIER_SELECT", "PO_CREATE", "PO_APPROVE", "GRN_POST", "REPORT_VIEW",
-  ];
+  // ONLYOFFICE Document Server cannot supply the application's browser
+  // session cookie. These two endpoints independently validate a signed,
+  // short-lived editor-session token before exposing or replacing a file.
+  if (/^\/api\/v1\/parts\/process-definitions\/\d+\/tool-list\/editor-(file|callback)$/.test(req.path)) {
+    return next();
+  }
 
-  req.user = {
-    userCode,
-    employeeName: String(
-      req.headers["x-user-name"] ||
-      (userCode === "SYSTEM" ? "System Administrator" : userCode)
-    ).trim(),
-    role,
-    permissions: roleKey === "ADMINISTRATOR" || roleKey === "PURCHASE_MANAGER"
-      ? [...new Set([...administratorPermissions, ...purchasePermissions, ...suppliedPermissions])]
-      : suppliedPermissions,
-    // Tenant is resolved from server configuration/auth context, never from request body.
-    tenantId: String(env.userTenantMap[userCode] || env.defaultTenantId),
-    companyId: env.defaultCompanyId,
-  };
+  try {
+    const session = await getAuthenticatedSession(sessionTokenFromRequest(req));
+    if (!session) throw new AppError("Sign in is required.", 401);
 
-  next();
+    req.user = session.user;
+    req.authSessionId = session.sessionId;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 }

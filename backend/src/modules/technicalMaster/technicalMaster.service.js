@@ -31,6 +31,14 @@ function normalizeInstrument(data) {
   return row;
 }
 
+function normalizeDepartment(data) {
+  const row = { departmentCode:code(data.departmentCode),departmentName:clean(data.departmentName),
+    displayOrder:Number(data.displayOrder || 0),activeFlag:activeFlag(data.activeFlag) };
+  if (!row.departmentCode || !row.departmentName) throw new AppError("Department Code and Department Name are required.");
+  if (!Number.isInteger(row.displayOrder) || row.displayOrder < 0) throw new AppError("Display Order must be zero or a positive whole number.");
+  return row;
+}
+
 function finite(value, label) {
   const number = Number(value);
   if (!Number.isFinite(number)) throw new AppError(`${label} must be a valid number.`);
@@ -47,6 +55,22 @@ function normalizeTolerance(data) {
   if (row.basicSizeFrom < 0 || row.basicSizeTo <= row.basicSizeFrom) {
     throw new AppError("Basic Size To must be greater than Basic Size From.");
   }
+  return row;
+}
+
+function normalizeInspectionCharacteristic(data) {
+  const row = { characteristicCode:code(data.characteristicCode),characteristicName:clean(data.characteristicName),
+    characteristicType:String(data.characteristicType || "VARIABLE").toUpperCase(),activeFlag:activeFlag(data.activeFlag) };
+  if (!row.characteristicCode || !row.characteristicName) throw new AppError("Characteristic Code and Characteristic Name are required.");
+  if (!["VARIABLE","ATTRIBUTE"].includes(row.characteristicType)) throw new AppError("Characteristic Type must be Variable or Attribute.");
+  return row;
+}
+
+function normalizeInspectionFrequency(data) {
+  const row = { frequencyCode:code(data.frequencyCode),frequencyLabel:clean(data.frequencyLabel),
+    displayOrder:Number(data.displayOrder || 0),activeFlag:activeFlag(data.activeFlag) };
+  if (!row.frequencyCode || !row.frequencyLabel) throw new AppError("Frequency Code and Frequency Label are required.");
+  if (!Number.isInteger(row.displayOrder) || row.displayOrder < 0) throw new AppError("Display Order must be zero or a positive whole number.");
   return row;
 }
 
@@ -98,7 +122,10 @@ async function paged(query, fetchRows) {
 
 export const listOperations = (query) => paged(query, () => repository.listOperations({ search:clean(query.search),status:activeFlagFilter(query.status) }));
 export const listInstruments = (query) => paged(query, () => repository.listInstruments({ search:clean(query.search),status:activeFlagFilter(query.status) }));
+export const listDepartments = (query) => paged(query, () => repository.listDepartments({ search:clean(query.search),status:activeFlagFilter(query.status) }));
 export const listToleranceGrades = (query) => paged(query, () => repository.listToleranceGrades({ search:clean(query.search),status:activeFlagFilter(query.status) }));
+export const listInspectionCharacteristics = (query) => paged(query, () => repository.listInspectionCharacteristics({ search:clean(query.search),status:activeFlagFilter(query.status) }));
+export const listInspectionFrequencies = (query) => paged(query, () => repository.listInspectionFrequencies({ search:clean(query.search),status:activeFlagFilter(query.status) }));
 export const listRejectionDispositions = (query) => paged(query, () => repository.listRejectionDispositions({ search:clean(query.search),status:activeFlagFilter(query.status) }));
 export const listRejectionReasons = (query) => paged(query, () => repository.listRejectionReasons({ search:clean(query.search),status:activeFlagFilter(query.status) }));
 
@@ -141,6 +168,22 @@ export async function saveInstrument(instrumentMasterId, data) {
   });
 }
 
+export async function saveDepartment(departmentId, data) {
+  const row = normalizeDepartment(data);
+  return withTransaction(async (connection) => {
+    const id = departmentId ? validId(departmentId,"Department ID") : 0;
+    if (await repository.findDepartmentConflict(connection,{ ...row,departmentId:id })) {
+      throw new AppError("Department Code or Department Name already exists.");
+    }
+    if (id) {
+      if (!await repository.updateDepartment(connection,id,row)) throw new AppError("Department Master record not found.",404);
+      return { departmentId:id,...row };
+    }
+    const createdId = await repository.insertDepartment(connection,row);
+    return { departmentId:createdId,...row };
+  });
+}
+
 export async function saveToleranceGrade(toleranceGradeId, data) {
   const row = normalizeTolerance(data);
   return withTransaction(async (connection) => {
@@ -154,6 +197,38 @@ export async function saveToleranceGrade(toleranceGradeId, data) {
     }
     const createdId = await repository.insertToleranceGrade(connection,row);
     return { toleranceGradeId:createdId,...row };
+  });
+}
+
+export async function saveInspectionCharacteristic(characteristicMasterId, data) {
+  const row = normalizeInspectionCharacteristic(data);
+  return withTransaction(async (connection) => {
+    const id = characteristicMasterId ? validId(characteristicMasterId,"Inspection Characteristic ID") : 0;
+    if (await repository.findInspectionCharacteristicConflict(connection,{ ...row,characteristicMasterId:id })) {
+      throw new AppError("Characteristic Code or Characteristic Name already exists.");
+    }
+    if (id) {
+      if (!await repository.updateInspectionCharacteristic(connection,id,row)) throw new AppError("Inspection Characteristic record not found.",404);
+      return { characteristicMasterId:id,...row };
+    }
+    const createdId = await repository.insertInspectionCharacteristic(connection,row);
+    return { characteristicMasterId:createdId,...row };
+  });
+}
+
+export async function saveInspectionFrequency(frequencyId, data) {
+  const row = normalizeInspectionFrequency(data);
+  return withTransaction(async (connection) => {
+    const id = frequencyId ? validId(frequencyId,"Inspection Frequency ID") : 0;
+    if (await repository.findInspectionFrequencyConflict(connection,{ ...row,frequencyId:id })) {
+      throw new AppError("Frequency Code or Frequency Label already exists.");
+    }
+    if (id) {
+      if (!await repository.updateInspectionFrequency(connection,id,row)) throw new AppError("Inspection Frequency record not found.",404);
+      return { frequencyId:id,...row };
+    }
+    const createdId = await repository.insertInspectionFrequency(connection,row);
+    return { frequencyId:createdId,...row };
   });
 }
 

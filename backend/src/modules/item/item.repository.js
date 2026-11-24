@@ -10,18 +10,19 @@ export async function listItems(filters = {}) {
   const search = String(filters.search || "").trim();
   const ids = ["itemGroupId", "itemTypeId", "materialId", "uomId", "supplierId"]
     .map((key) => integer(filters[key]));
+  const rateSupplierId = integer(filters.rateSupplierId);
   const inspection = ["Y", "N"].includes(String(filters.inspectionRequired || "").toUpperCase())
     ? String(filters.inspectionRequired).toUpperCase() : "";
   const active = ["Y", "N"].includes(String(filters.activeFlag || "").toUpperCase())
     ? String(filters.activeFlag).toUpperCase() : "";
   const [itemGroupId, itemTypeId, materialId, uomId, supplierId] = ids;
-  const params = [search, search, search, itemGroupId, itemGroupId, itemTypeId, itemTypeId,
+  const filterParams = [search, search, search, itemGroupId, itemGroupId, itemTypeId, itemTypeId,
     materialId, materialId, uomId, uomId, inspection, inspection, active, active,
     supplierId, supplierId];
   const limit = integer(filters.limit, 20, 1, 100);
   const offset = integer(filters.offset, 0);
-  const [rows] = await db.execute(`${queries.LIST_ITEMS} LIMIT ${limit} OFFSET ${offset}`, params);
-  const [countRows] = await db.execute(queries.COUNT_ITEMS, params);
+  const [rows] = await db.execute(`${queries.LIST_ITEMS} LIMIT ${limit} OFFSET ${offset}`, [rateSupplierId, ...filterParams]);
+  const [countRows] = await db.execute(queries.COUNT_ITEMS, filterParams);
   return { rows, total: Number(countRows[0]?.total || 0) };
 }
 
@@ -47,10 +48,13 @@ export async function getLookups() {
       WHERE MG.active_flag='Y' AND M.active_flag='Y'
       ORDER BY MG.grade_name`),
     db.query(`SELECT supplier_id AS supplierId, supplier_code AS supplierCode,
-      supplier_name AS supplierName FROM supplier_master
-      WHERE active_flag='Y' ORDER BY supplier_name`),
+      supplier_name AS supplierName,supplier_category AS supplierCategory FROM supplier_master
+      WHERE active_flag='Y' AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED' ORDER BY supplier_name`),
     db.query(`SELECT customer_id AS customerId,customer_code AS customerCode,customer_name AS customerName
-      FROM customer_master WHERE active_flag='Y' AND party_type IN ('CUSTOMER','BOTH')
+      FROM customer_master
+      WHERE active_flag='Y'
+        AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED'
+        AND party_type IN ('CUSTOMER','BOTH')
       ORDER BY customer_name`),
     db.query(`SELECT reference_group AS referenceGroup, reference_code AS referenceCode,
       reference_label AS referenceLabel FROM item_reference_value
@@ -61,7 +65,9 @@ export async function getLookups() {
         COALESCE(NULLIF(TRIM(drawing_code),''),NULLIF(TRIM(drawing_number),'')) AS drawingCode,
         drawing_number AS drawingNumber,part_number AS partNumber,part_name AS partName
       FROM part_master
-      WHERE active_flag='Y' AND part_status='ACTIVE'
+      WHERE active_flag='Y'
+        AND part_status='ACTIVE'
+        AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED'
         AND COALESCE(NULLIF(TRIM(drawing_code),''),NULLIF(TRIM(drawing_number),'')) IS NOT NULL
       ORDER BY drawingCode,partNumber`),
     db.query(`SELECT item_type_spec_field_id AS specFieldId, item_type_id AS itemTypeId,
@@ -119,6 +125,27 @@ export async function insertItemCategory(connection, data, userCode) {
   return Number(result.insertId);
 }
 
+export async function deactivateItemCategory(connection, itemTypeId, userCode) {
+  const [result] = await connection.execute(`UPDATE item_type_master
+    SET active_flag='N',updated_by=? WHERE item_type_id=? AND active_flag='Y'`,
+  [userCode, Number(itemTypeId)]);
+  return result.affectedRows > 0;
+}
+
+export async function getSpecificationOptionFieldForUpdate(connection, specFieldId) {
+  const [rows] = await connection.execute(`SELECT item_type_spec_field_id AS specFieldId,
+    field_label AS fieldLabel,input_type AS inputType,required_flag AS requiredFlag,
+    option_values_json AS optionValues
+    FROM item_type_spec_field
+    WHERE item_type_spec_field_id=? AND active_flag='Y' FOR UPDATE`, [Number(specFieldId)]);
+  return rows[0] || null;
+}
+
+export async function updateSpecificationOptionValues(connection, specFieldId, optionValues) {
+  await connection.execute(`UPDATE item_type_spec_field SET option_values_json=?
+    WHERE item_type_spec_field_id=?`, [JSON.stringify(optionValues), Number(specFieldId)]);
+}
+
 export async function getItemCategory(connection, itemTypeId) {
   const [rows] = await connection.execute(`SELECT item_type_id AS itemTypeId,item_group_id AS itemGroupId,
     type_name AS typeName,description_prefix AS descriptionPrefix,item_code_prefix AS itemCodePrefix
@@ -157,6 +184,20 @@ export async function getItemById(itemId, connection = db) {
       S.preferred_supplier AS preferredSupplier, S.remarks
     FROM item_supplier S JOIN supplier_master C ON C.supplier_id=S.supplier_id
     WHERE S.item_id=? ORDER BY S.preferred_supplier DESC, C.supplier_name`, [Number(itemId)]);
+  const [supplierPriceHistory] = await connection.execute(`
+    SELECT H.item_supplier_price_history_id AS itemSupplierPriceHistoryId,
+      H.supplier_id AS supplierId, S.supplier_code AS supplierCode,
+      S.supplier_name AS supplierName,
+      H.previous_purchase_rate AS previousPurchaseRate,
+      H.new_purchase_rate AS newPurchaseRate,
+      H.previous_currency_code AS previousCurrencyCode,
+      H.new_currency_code AS newCurrencyCode,
+      H.change_type AS changeType, H.effective_from AS effectiveFrom,
+      H.changed_by AS changedBy, H.changed_on AS changedOn
+    FROM item_supplier_price_history H
+    JOIN supplier_master S ON S.supplier_id=H.supplier_id
+    WHERE H.item_id=?
+    ORDER BY H.changed_on DESC, H.item_supplier_price_history_id DESC`, [Number(itemId)]);
   let customerSupplied = null;
   try {
     const [customerRows] = await connection.execute(`SELECT CSI.customer_id AS customerId,
@@ -199,12 +240,15 @@ export async function getItemById(itemId, connection = db) {
     WHERE IC.item_id=? ORDER BY IC.sequence_number`, [Number(itemId)]);
   return { ...rows[0], customerId: customerSupplied?.customerId ?? null,
     customerCode: customerSupplied?.customerCode ?? null, customerName: customerSupplied?.customerName ?? null,
-    suppliers, specifications, attachments, inspectionPlanCharacteristics };
+    suppliers, supplierPriceHistory, specifications, attachments, inspectionPlanCharacteristics };
 }
 
 export async function validateCustomer(connection, customerId) {
   const [rows] = await connection.execute(`SELECT customer_id FROM customer_master
-    WHERE customer_id=? AND active_flag='Y' AND party_type IN ('CUSTOMER','BOTH')`, [Number(customerId)]);
+    WHERE customer_id=?
+      AND active_flag='Y'
+      AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED'
+      AND party_type IN ('CUSTOMER','BOTH')`, [Number(customerId)]);
   return Boolean(rows[0]);
 }
 
@@ -246,7 +290,7 @@ export async function getExistingItemIdentityRows(connection, itemTypeIds) {
   return rows;
 }
 
-export async function validateReferences(connection, data) {
+export async function validateReferences(connection, data, { allowInactiveItemType = false } = {}) {
   const [rows] = await connection.execute(`
     SELECT G.group_code,T.type_name,T.description_prefix,T.item_code_prefix,
       MG.material_id,MG.grade_code,MG.grade_name,M.material_name,M.material_short_code
@@ -254,9 +298,10 @@ export async function validateReferences(connection, data) {
     JOIN uom_master U ON U.uom_id=? AND U.active_flag='Y'
     LEFT JOIN material_grade_master MG ON MG.material_grade_id=? AND MG.active_flag='Y'
     LEFT JOIN material_master M ON M.material_id=MG.material_id AND M.active_flag='Y'
-    WHERE G.item_group_id=? AND G.active_flag='Y' AND T.item_type_id=? AND T.active_flag='Y'
+    WHERE G.item_group_id=? AND G.active_flag='Y' AND T.item_type_id=?
+      AND (T.active_flag='Y' OR ?)
       AND (? IS NULL OR (MG.material_grade_id IS NOT NULL AND M.material_id IS NOT NULL))`,
-    [data.uomId, data.materialGradeId, data.itemGroupId, data.itemTypeId,
+    [data.uomId, data.materialGradeId, data.itemGroupId, data.itemTypeId, allowInactiveItemType ? 1 : 0,
       data.materialGradeId]);
   return rows[0] || null;
 }
@@ -283,7 +328,9 @@ export async function getActiveDrawingCodes(connection, drawingCodes) {
   const [rows]=await connection.execute(`SELECT DISTINCT
       COALESCE(NULLIF(TRIM(drawing_code),''),NULLIF(TRIM(drawing_number),'')) AS drawingCode
     FROM part_master
-    WHERE active_flag='Y' AND part_status='ACTIVE'
+    WHERE active_flag='Y'
+      AND part_status='ACTIVE'
+      AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED'
       AND COALESCE(NULLIF(TRIM(drawing_code),''),NULLIF(TRIM(drawing_number),'')) IN (${placeholders})`,drawingCodes);
   return rows;
 }
@@ -292,22 +339,31 @@ export async function validateSuppliers(connection, supplierIds) {
   if (!supplierIds.length) return true;
   const placeholders = supplierIds.map(() => "?").join(",");
   const [rows] = await connection.execute(`SELECT COUNT(*) AS total FROM supplier_master
-    WHERE supplier_id IN (${placeholders}) AND active_flag='Y'`, supplierIds);
+    WHERE supplier_id IN (${placeholders}) AND active_flag='Y'
+      AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED'`, supplierIds);
   return Number(rows[0].total) === supplierIds.length;
+}
+
+export async function validateSupplierCategory(connection, supplierId, supplierCategory) {
+  const [rows] = await connection.execute(`SELECT COUNT(*) AS total FROM supplier_master
+    WHERE supplier_id=? AND active_flag='Y'
+      AND COALESCE(save_status, 'SUBMITTED')='SUBMITTED'
+      AND supplier_category=?`, [Number(supplierId), String(supplierCategory).trim().toUpperCase()]);
+  return Number(rows[0]?.total || 0) === 1;
 }
 
 export async function insertItem(connection, data, itemCode, userCode) {
   const [result] = await connection.execute(`INSERT INTO item_master
     (item_code,item_group_id,item_type_id,item_description,item_specification,additional_description,uom_id,material_id,material_grade_id,
-     inspection_required,hsn_code,purchase_rate,minimum_stock,make_name,model_name,machine_type_id,machine_capacity,
+     mtc_applicable,inspection_required,hsn_code,tax_percent,purchase_rate,minimum_stock,make_name,model_name,machine_type_id,machine_capacity,
      lead_time_days,reorder_level,maximum_stock,storage_location,shelf_life_applicable,shelf_life_days,
      batch_tracking_required,serial_tracking_required,drawing_number,drawing_revision,serial_number,asset_category,
      warranty_applicable,warranty_period_months,installation_required,calibration_required,calibration_frequency,
      measurement_range,least_count,accuracy,calibration_agency_id,remarks,item_status,active_flag,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [itemCode, data.itemGroupId, data.itemTypeId, data.itemDescription, data.itemSpecification,
-      data.additionalDescription, data.uomId, data.materialId, data.materialGradeId, data.inspectionRequired, data.hsnCode,
-      data.purchaseRate, data.minimumStock, data.makeName, data.modelName, data.machineTypeId, data.machineCapacity,
+      data.additionalDescription, data.uomId, data.materialId, data.materialGradeId, data.mtcApplicable, data.inspectionRequired, data.hsnCode,
+      data.taxPercent, data.purchaseRate, data.minimumStock, data.makeName, data.modelName, data.machineTypeId, data.machineCapacity,
       data.leadTimeDays, data.reorderLevel, data.maximumStock,
       data.storageLocation, data.shelfLifeApplicable, data.shelfLifeDays, data.batchTrackingRequired, data.serialTrackingRequired,
       data.drawingNumber, data.drawingRevision, data.serialNumber, data.assetCategory, data.warrantyApplicable,
@@ -319,14 +375,14 @@ export async function insertItem(connection, data, itemCode, userCode) {
 
 export async function updateItem(connection, itemId, data, userCode) {
   await connection.execute(`UPDATE item_master SET item_type_id=?,item_description=?,
-    item_specification=?,additional_description=?,uom_id=?,material_id=?,material_grade_id=?,inspection_required=?,hsn_code=?,purchase_rate=?,
+    item_specification=?,additional_description=?,uom_id=?,material_id=?,material_grade_id=?,mtc_applicable=?,inspection_required=?,hsn_code=?,tax_percent=?,purchase_rate=?,
     minimum_stock=?,make_name=?,model_name=?,machine_type_id=?,machine_capacity=?,
     lead_time_days=?,reorder_level=?,maximum_stock=?,storage_location=?,shelf_life_applicable=?,shelf_life_days=?,batch_tracking_required=?,
     serial_tracking_required=?,drawing_number=?,drawing_revision=?,serial_number=?,asset_category=?,warranty_applicable=?,
     warranty_period_months=?,installation_required=?,calibration_required=?,calibration_frequency=?,measurement_range=?,
     least_count=?,accuracy=?,calibration_agency_id=?,remarks=?,updated_by=? WHERE item_id=?`,
     [data.itemTypeId, data.itemDescription, data.itemSpecification, data.additionalDescription, data.uomId, data.materialId,
-      data.materialGradeId, data.inspectionRequired, data.hsnCode, data.purchaseRate, data.minimumStock,
+      data.materialGradeId, data.mtcApplicable, data.inspectionRequired, data.hsnCode, data.taxPercent, data.purchaseRate, data.minimumStock,
       data.makeName, data.modelName, data.machineTypeId, data.machineCapacity,
       data.leadTimeDays, data.reorderLevel, data.maximumStock, data.storageLocation, data.shelfLifeApplicable, data.shelfLifeDays,
       data.batchTrackingRequired, data.serialTrackingRequired, data.drawingNumber, data.drawingRevision,
@@ -336,14 +392,38 @@ export async function updateItem(connection, itemId, data, userCode) {
 }
 
 export async function replaceSuppliers(connection, itemId, suppliers, userCode) {
+  const [currentSuppliers] = await connection.execute(`
+    SELECT supplier_id AS supplierId,purchase_rate AS purchaseRate,currency_code AS currencyCode,
+      effective_from AS effectiveFrom,effective_to AS effectiveTo
+    FROM item_supplier WHERE item_id=? FOR UPDATE`, [Number(itemId)]);
+  const currentSupplierById = new Map(currentSuppliers.map((supplier) => [Number(supplier.supplierId), supplier]));
   await connection.execute(`DELETE FROM item_supplier WHERE item_id=?`, [itemId]);
   for (const supplier of suppliers) {
+    const currentSupplier = currentSupplierById.get(Number(supplier.supplierId));
     await connection.execute(`INSERT INTO item_supplier
       (item_id,supplier_id,supplier_item_code,purchase_rate,currency_code,moq,lead_time_days,effective_from,
        effective_to,preferred_supplier,remarks,created_by)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, [itemId, supplier.supplierId, supplier.supplierItemCode,
-      supplier.purchaseRate, supplier.currencyCode, supplier.moq, supplier.leadTimeDays, supplier.effectiveFrom,
-      supplier.effectiveTo, supplier.preferredSupplier, supplier.remarks, userCode]);
+      supplier.purchaseRate, supplier.currencyCode, supplier.moq, supplier.leadTimeDays, currentSupplier?.effectiveFrom ?? null,
+      currentSupplier?.effectiveTo ?? null, supplier.preferredSupplier, supplier.remarks, userCode]);
+    const previousRate = currentSupplier?.purchaseRate ?? null;
+    const nextRate = supplier.purchaseRate ?? null;
+    const previousCurrency = String(currentSupplier?.currencyCode || "").trim().toUpperCase() || null;
+    const nextCurrency = String(supplier.currencyCode || "").trim().toUpperCase() || null;
+    const rateChanged = previousRate === null
+      ? nextRate !== null
+      : nextRate === null || Number(previousRate) !== Number(nextRate);
+    const currencyChanged = previousCurrency !== nextCurrency;
+    if ((currentSupplier && (rateChanged || currencyChanged)) || (!currentSupplier && nextRate !== null)) {
+      const changeType = !currentSupplier
+        ? "INITIAL_RATE"
+        : nextRate === null ? "RATE_CLEARED" : "RATE_CHANGED";
+      await connection.execute(`INSERT INTO item_supplier_price_history
+        (item_id,supplier_id,previous_purchase_rate,new_purchase_rate,
+         previous_currency_code,new_currency_code,change_type,effective_from,changed_by)
+        VALUES (?,?,?,?,?,?,?,?,?)`, [itemId, supplier.supplierId, previousRate, nextRate,
+        previousCurrency, nextCurrency, changeType, currentSupplier?.effectiveFrom ?? null, userCode]);
+    }
   }
 }
 

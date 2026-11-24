@@ -88,8 +88,10 @@ CREATE TABLE IF NOT EXISTS item_master (
   uom_id BIGINT UNSIGNED NOT NULL,
   material_id BIGINT UNSIGNED NULL,
   material_grade_id BIGINT UNSIGNED NULL,
-  inspection_required ENUM('Y', 'N') NOT NULL DEFAULT 'N',
+  mtc_applicable ENUM('Y', 'N') NOT NULL DEFAULT 'N',
+  inspection_required ENUM('Y', 'N') NOT NULL DEFAULT 'Y',
   hsn_code VARCHAR(20) NULL,
+  tax_percent DECIMAL(7,4) NOT NULL DEFAULT 0.0000,
   purchase_rate DECIMAL(18,2) NULL,
   minimum_stock DECIMAL(18,3) NULL,
   make_name VARCHAR(150) NULL,
@@ -172,6 +174,28 @@ CREATE TABLE IF NOT EXISTS item_supplier (
     REFERENCES item_master (item_id)
     ON UPDATE CASCADE ON DELETE CASCADE,
   CONSTRAINT fk_item_supplier_party FOREIGN KEY (supplier_id)
+    REFERENCES supplier_master (supplier_id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS item_supplier_price_history (
+  item_supplier_price_history_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  item_id BIGINT UNSIGNED NOT NULL,
+  supplier_id BIGINT UNSIGNED NOT NULL,
+  previous_purchase_rate DECIMAL(18,2) NULL,
+  new_purchase_rate DECIMAL(18,2) NULL,
+  previous_currency_code VARCHAR(10) NULL,
+  new_currency_code VARCHAR(10) NULL,
+  change_type VARCHAR(30) NOT NULL,
+  effective_from DATE NULL,
+  changed_by VARCHAR(50) NOT NULL,
+  changed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (item_supplier_price_history_id),
+  KEY ix_item_supplier_price_history_item (item_id, supplier_id, changed_on),
+  CONSTRAINT fk_item_supplier_price_history_item FOREIGN KEY (item_id)
+    REFERENCES item_master (item_id)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_item_supplier_price_history_supplier FOREIGN KEY (supplier_id)
     REFERENCES supplier_master (supplier_id)
     ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,4 +1,5 @@
 import { withTransaction } from "../../config/db.js";
+import { recordGrnToolReceipt } from "../tooling/tooling.service.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { env } from "../../config/env.js";
@@ -10,11 +11,14 @@ import { GRN_TRANSITIONS } from "../../shared/constants/purchase.js";
 import * as repository from "./grn.repository.js";
 import * as rejectionRepository from "./grn-rejection.repository.js";
 import * as inventoryRepository from "../inventory/inventory.repository.js";
+import * as locationMasterRepository from "../location-master/location-master.repository.js";
 import { validateGrn, validateGrnStockPosting } from "./grn.validation.js";
 import { markGrnCreated, markOutsourcingWip, markStockPosted } from "../gate-entry/gate-entry.service.js";
 
 const inspectionDispositions = new Set(["HOLD", "FULL_INSPECTION", "REJECT_LOT", "PARTIAL_ACCEPT", "DEVIATION_ACCEPT"]);
 const inspectionResults = new Set(["PENDING", "PASS", "FAIL"]);
+const inspectionLineResults = new Set(["PENDING", "ACCEPTED", "PARTIAL", "REJECTED", "ON_HOLD"]);
+const storageLocationKey = (warehouseName, subinventoryCode, locationName) => `${String(warehouseName || "").trim().toUpperCase()}\u0000${String(subinventoryCode || "").trim().toUpperCase()}\u0000${String(locationName || "").trim().toUpperCase()}`;
 
 async function addInspectionPlanSnapshot(connection, tenantId, grnItemId, itemId, userCode) {
   const plan = await repository.getItemInspectionPlan(connection, itemId);
@@ -23,6 +27,12 @@ async function addInspectionPlanSnapshot(connection, tenantId, grnItemId, itemId
 
 export async function list(query, user) { const page = Math.max(Number(query.page || 1), 1); const pageSize = Math.min(Math.max(Number(query.pageSize || 20), 1), 100); const result = await repository.list({ tenantId: user.tenantId, status: String(query.status || "").toUpperCase(), search: String(query.search || "").trim(), receiptType: String(query.receiptType || "").trim().toUpperCase(), supplier: String(query.supplier || "").trim(), rejectedInspection: String(query.rejectedInspection || "").trim().toLowerCase() === "true", limit: pageSize, offset: (page - 1) * pageSize }); return { ...result, page, pageSize }; }
 export async function summary(user) { return repository.summary(user.tenantId); }
+export async function pendingPoReceipts(query, user) {
+  const page = Math.max(Number(query.page || 1), 1);
+  const pageSize = Math.min(Math.max(Number(query.pageSize || 20), 1), 100);
+  const result = await repository.listPendingPoReceipts({ tenantId: user.tenantId, search: String(query.search || "").trim(), limit: pageSize, offset: (page - 1) * pageSize });
+  return { ...result, page, pageSize };
+}
 export async function listSupplierOptions(user) { return repository.listSupplierOptions(user.tenantId); }
 export async function get(id, user) { const result = await repository.get(id, user.tenantId); if (!result) throw new AppError("GRN not found.", 404); return result; }
 
@@ -61,7 +71,24 @@ async function saveReceipt(id, raw, user) {
     const directItems = direct && !outsourcing ? await repository.getOpenPurchaseItems(connection, data.items.map(item => item.itemId)) : [];
     if (direct && !outsourcing && directItems.length !== data.items.length) throw new AppError('Every direct receipt line must use an active Item Master item.', 409);
     const byId = new Map((order?.items || []).map(item => [Number(item.purchase_order_item_id), item]));
+    const reservedByPoItem = new Map((!direct && order
+      ? await repository.getInFlightGrnQuantities(connection, user.tenantId, order.purchase_order_id, id)
+      : []).map((row) => [Number(row.purchaseOrderItemId), Number(row.reservedQuantity || 0)]));
     const directById = new Map(directItems.map(item => [Number(item.item_id), item]));
+    if (!outsourcing && data.action === 'INWARD') {
+      const inspectedItems = data.items.filter((row) => row.inspectionRequired).map((row) => direct ? directById.get(row.itemId) : byId.get(row.purchaseOrderItemId));
+      const missingSetup = [];
+      for (const item of inspectedItems) {
+        const itemId = Number(item?.item_id);
+        const inspectionRequired = String(item?.inspection_required ?? item?.item_inspection_required ?? 'N').toUpperCase() === 'Y';
+        const plan = inspectionRequired ? await repository.getItemInspectionPlan(connection, itemId) : [];
+        if (!inspectionRequired || !plan.length) missingSetup.push(item);
+      }
+      if (missingSetup.length) {
+        const names = missingSetup.map((item) => item?.item_description || item?.item_description_snapshot || 'selected item').join(', ');
+        throw new AppError(`Update Item Master inspection details for ${names} before proceeding with GRN Inward.`, 409, { code: 'ITEM_MASTER_INSPECTION_SETUP_REQUIRED' });
+      }
+    }
     const status = data.action === 'INWARD' ? (outsourcing ? 'OUTSOURCING_WIP' : data.inspectionRequired === false ? 'ACCEPTED' : 'INSPECTION_PENDING') : 'DRAFT';
     const inspectionStatus = outsourcing ? 'PROCESS_PLAN_PENDING' : data.inspectionRequired === false ? 'NOT_REQUIRED' : 'PENDING';
     const supplierId = order?.supplier_id || supplier?.supplier_id || null;
@@ -80,12 +107,13 @@ async function saveReceipt(id, raw, user) {
     for (const row of data.items) {
       const item = outsourcing ? null : direct ? directById.get(row.itemId) : byId.get(row.purchaseOrderItemId);
       if (!outsourcing && !item) throw new AppError('A GRN line does not belong to the selected purchase order.', 409);
-      const previous = direct ? 0 : Number(item.received_quantity || 0);
-      if (!direct && previous + row.receivedQuantity > Number(item.ordered_quantity) + 0.0001) throw new AppError('Received quantity exceeds the open PO quantity.', 409);
-      const grnItemId = await repository.insertItem(connection, [user.tenantId, grnId, direct ? null : item.purchase_order_item_id, outsourcing ? null : item.item_id, outsourcing ? outsourcingPart.part_name : direct ? item.item_description : item.item_description_snapshot, outsourcing ? outsourcingPart.unit_of_measurement || '' : direct ? item.uom_code : item.uom_code_snapshot, direct ? row.receivedQuantity : item.ordered_quantity, previous, row.receivedQuantity, outsourcing ? null : direct ? row.directRatePerQty : null, outsourcing ? null : direct ? row.taxPercent : null, status === 'ACCEPTED' ? row.receivedQuantity : 0, 0, null, 'N']);
-      await repository.updateStockReceiptItem(connection, user.tenantId, grnItemId, [null, null, String(row.batchSerialNumber || '').trim() || null]);
+      const previous = direct ? 0 : Number(item.received_quantity || 0) + Number(reservedByPoItem.get(Number(item.purchase_order_item_id)) || 0);
+      if (!direct && previous + row.receivedQuantity > Number(item.ordered_quantity) + 0.0001) throw new AppError('Received quantity exceeds the remaining PO quantity after other GRN inwards.', 409);
+      const mtcApplicable = !outsourcing && String(direct ? item.mtc_applicable : item.item_mtc_applicable || 'N').toUpperCase() === 'Y' ? 'Y' : 'N';
+      const grnItemId = await repository.insertItem(connection, [user.tenantId, grnId, direct ? null : item.purchase_order_item_id, outsourcing ? null : item.item_id, outsourcing ? outsourcingPart.part_name : direct ? item.item_description : item.item_description_snapshot, outsourcing ? outsourcingPart.unit_of_measurement || '' : direct ? item.uom_code : item.uom_code_snapshot, direct ? row.receivedQuantity : item.ordered_quantity, previous, row.receivedQuantity, outsourcing ? null : direct ? row.directRatePerQty : null, outsourcing ? null : direct ? row.taxPercent : null, status === 'ACCEPTED' ? row.receivedQuantity : 0, 0, null, 'N', mtcApplicable]);
+      await repository.updateStockReceiptItem(connection, user.tenantId, grnItemId, [null, 'GENERAL', null, String(row.batchSerialNumber || '').trim() || null]);
       if (outsourcing && data.action === 'INWARD') await repository.createOutsourcingWipBalance(connection, { tenantId:user.tenantId, companyId:user.companyId, plantId:order?.plant_id || gate.plant_id || null, grnId, grnItemId, gateEntryId:data.gateEntryId, supplierId, partId:outsourcingPart.part_id, partNumber:outsourcingPart.part_number, partName:outsourcingPart.part_name, uomCode:outsourcingPart.unit_of_measurement || '', batchSerialNumber:row.batchSerialNumber, processPlanId:processOperation.process_plan_id, processOperationId:processOperation.process_operation_id, processPlanCode:processOperation.plan_code || null, operationNumber:processOperation.operation_number, operationName:processOperation.operation_name, inspectionRequired:processOperation.inspection_required || 'N', quantity:row.receivedQuantity, grnNumber, userCode:user.userCode });
-      if (!outsourcing && data.inspectionRequired !== false) await addInspectionPlanSnapshot(connection, user.tenantId, grnItemId, item.item_id, user.userCode);
+      if (!outsourcing && row.inspectionRequired) await addInspectionPlanSnapshot(connection, user.tenantId, grnItemId, item.item_id, user.userCode);
     }
     if (data.gateEntryId && data.action === 'INWARD') {
       if (outsourcing) await markOutsourcingWip(connection, data.gateEntryId, user);
@@ -205,6 +233,7 @@ export async function inspect(id, data, user) {
       let a = Number(input.acceptedQuantity || 0); let r = Number(input.rejectedQuantity || 0); let h = Number(input.onHoldQuantity || 0);
       let disposition = String(input.inspectionDisposition || "").toUpperCase();
       const qualityRemarks = String(input.qualityRemarks || "").trim(); const rejectionReason = String(input.rejectionReason || "").trim();
+      const inspectionResult = String(input.inspectionResult || (h > 0 ? "ON_HOLD" : r > 0 ? (a > 0 ? "PARTIAL" : "REJECTED") : a > 0 ? "ACCEPTED" : "PENDING")).toUpperCase();
       if (itemFailed) {
         failedSample = true;
         if (!disposition || disposition === "PENDING") disposition = "HOLD";
@@ -214,8 +243,10 @@ export async function inspect(id, data, user) {
         if (disposition === "DEVIATION_ACCEPT") { a = received; r = 0; h = 0; if (!qualityRemarks) throw new AppError(`Authorisation remarks are required for deviation acceptance of ${item.item_description_snapshot}.`, 400); }
         if (disposition === "PARTIAL_ACCEPT") { h = 0; if (a <= 0 || r <= 0 || a + r !== received) throw new AppError(`Partial acceptance for ${item.item_description_snapshot} requires accepted and rejected quantities.`, 400); }
       } else {
+        if (!inspectionLineResults.has(inspectionResult) || (!planned.length && inspectionResult === "PENDING")) throw new AppError(`Select the inspection result for ${item.item_description_snapshot}.`, 400);
         disposition = "PENDING";
-        if (a < 0 || r < 0 || h < 0 || a + r + h !== received || h > 0) throw new AppError("Accepted plus rejected quantity must equal received quantity.", 409);
+        if (inspectionResult === "ON_HOLD") { a = 0; r = 0; h = received; }
+        else if (a < 0 || r < 0 || h < 0 || h > 0 || a + r !== received) throw new AppError("Accepted plus rejected quantity must equal received quantity.", 409);
       }
       const rejection = await resolveRejection(connection, input, grn, item, r);
       accepted += a; rejected += r; onHold += h;
@@ -264,16 +295,38 @@ export async function post(id, raw, user) {
     const order = isOpenPurchase ? null : await repository.getApprovedOrder(connection, user.tenantId, grn.purchase_order_id) || await repository.getReceivableOrder(connection, user.tenantId, grn.purchase_order_id); if (!isOpenPurchase && !order) throw new AppError("Purchase order is not available for receipt posting.", 409);
     const acceptedItems = grn.items.filter((item) => Number(item.accepted_quantity || 0) > 0);
     if (!acceptedItems.length || data.items.length !== acceptedItems.length) throw new AppError("Provide one stock receipt location for every accepted GRN line.", 400);
+    const missingMtcCertificates = acceptedItems.filter((item) =>
+      String(item.item_mtc_applicable || "N").toUpperCase() === "Y" && !(item.mtc_certificates || []).length
+    );
+    if (missingMtcCertificates.length) {
+      const itemNames = missingMtcCertificates
+        .map((item) => item.item_description_snapshot || item.item_code_snapshot || `GRN line ${item.grn_item_id}`)
+        .join(", ");
+      throw new AppError(`Upload an MTC certificate for ${itemNames} before posting the receipt to stock.`, 409, {
+        code: "MTC_CERTIFICATE_REQUIRED",
+      });
+    }
     const locations = new Map(data.items.map((item) => [item.grnItemId, item]));
+    const activeStorageLocations = new Set((await locationMasterRepository.listLocations({ tenantId: user.tenantId, status: "Y" }, connection)).map((location) => storageLocationKey(location.warehouseName, location.subinventoryCode, location.locationName)));
     for (const item of acceptedItems) {
-      const location = locations.get(Number(item.grn_item_id)); if (!location) throw new AppError("A stock location is missing for an accepted GRN line.", 400);
+      const selectedLocation = locations.get(Number(item.grn_item_id)); if (!selectedLocation) throw new AppError("A stock location is missing for an accepted GRN line.", 400);
+      // Tools are normal Item Master purchases, but their accepted GRN quantity always starts at Tool Crib / Tooling.
+      const isToolingItem = String(item.item_group_code || "").toUpperCase() === "TL";
+      // The quantity-based tooling ledger is intentionally not batch/serial based.
+      // Keep every TL receipt in the single Tool Crib balance used by issue, return and regrinding.
+      const location = isToolingItem
+        ? { ...selectedLocation, warehouseCode: "Tool Crib", subinventoryCode: "TOOLS", binLocation: "Tooling", batchSerialNumber: "" }
+        : selectedLocation;
+      if (!activeStorageLocations.has(storageLocationKey(location.warehouseCode, location.subinventoryCode, location.binLocation))) throw new AppError(`Choose an active Warehouse, Sub-inventory, and Bin Location Master value for ${item.item_description_snapshot}.`, 400);
+      if (ownerType === "CUSTOMER" && String(location.warehouseCode).trim().toUpperCase() !== "CUSTOMER MATERIAL STORES") throw new AppError("Customer-supplied material must be posted to Customer Material Stores.", 400);
       const poItem = isOpenPurchase ? null : order.items.find((row) => Number(row.purchase_order_item_id) === Number(item.purchase_order_item_id)); if (!isOpenPurchase && !poItem) throw new AppError("PO line is no longer open.", 409);
       const accepted = Number(item.accepted_quantity || 0); const received = Number(poItem?.received_quantity || 0) + accepted;
       if (!isOpenPurchase && received > Number(poItem.ordered_quantity) + 0.0001) throw new AppError(`Posting exceeds the PO quantity for ${item.item_description_snapshot}.`, 409);
       const lineStatus = !isOpenPurchase && received >= Number(poItem.ordered_quantity) - 0.0001 ? "RECEIVED" : "PARTIALLY_RECEIVED";
-      await repository.updateStockReceiptItem(connection, user.tenantId, item.grn_item_id, [location.warehouseCode, location.binLocation, location.batchSerialNumber || null]);
-      const balance = await repository.upsertInventoryBalance(connection, [user.tenantId, grn.company_id, grn.plant_id || "", item.item_id, location.warehouseCode, location.binLocation, location.batchSerialNumber || "", accepted, user.userCode, user.userCode], ownerType, ownerId);
-      await repository.insertInventoryTransaction(connection, [user.tenantId, grn.company_id, grn.plant_id, "GRN_RECEIPT", data.stockPostingDate, item.item_id, id, item.grn_item_id, location.warehouseCode, location.binLocation, location.batchSerialNumber || "", accepted, 0, balance.quantityOnHand, `Accepted GRN receipt ${grn.grn_number}`, user.userCode], ownerType, ownerId);
+      await repository.updateStockReceiptItem(connection, user.tenantId, item.grn_item_id, [location.warehouseCode, location.subinventoryCode, location.binLocation, location.batchSerialNumber || null]);
+      const balance = await repository.upsertInventoryBalance(connection, [user.tenantId, grn.company_id, grn.plant_id || "", item.item_id, location.warehouseCode, location.subinventoryCode, location.binLocation, "AVAILABLE", location.batchSerialNumber || "", "", accepted, user.userCode, user.userCode], ownerType, ownerId);
+      await repository.insertInventoryTransaction(connection, [user.tenantId, grn.company_id, grn.plant_id, "GRN_RECEIPT", data.stockPostingDate, item.item_id, id, item.grn_item_id, location.warehouseCode, location.subinventoryCode, location.binLocation, "AVAILABLE", location.batchSerialNumber || "", "", accepted, 0, balance.quantityOnHand, `Accepted GRN receipt ${grn.grn_number}`, user.userCode], ownerType, ownerId);
+      if (isToolingItem) await recordGrnToolReceipt(connection, { grn, item, location, quantity: accepted, postingDate: data.stockPostingDate, user });
       if (!isOpenPurchase) await repository.updatePoItem(connection, user.tenantId, poItem.purchase_order_item_id, received, lineStatus);
     }
     let poStatus = null;

@@ -12,7 +12,8 @@ try {
   const machineType = masters.machineTypes[0];
   const characteristic = masters.characteristics[0];
   const instrument = masters.instruments[0];
-  assert.ok(operation && machineType && characteristic && instrument, "Process and Inspection masters must be seeded.");
+  const toleranceStandard = masters.toleranceStandards[0];
+  assert.ok(operation && machineType && characteristic && instrument && toleranceStandard, "Process and Inspection masters must be seeded.");
   await repository.replaceProcessPlan(connection, part.partId, {
     drawingRevisionNumber: part.revision || "TEST",
     productionCapacityPerDay: 100,
@@ -23,7 +24,7 @@ try {
       outsourceCostInr:null,processCostInr:25,inspectionPlan:{ planStatus:"READY",cmmRequired:true,characteristics:[{
         sequenceNumber:1,balloonNumber:"B1",characteristicMasterId:null,characteristicText:"Surface finish - visual",
         specifiedDimension:10,toleranceMode:"MANUAL",toleranceGradeId:null,toleranceGradeText:"CUSTOM-TOL",toleranceMinus:0.1,
-        tolerancePlus:0.1,lsl:9.9,usl:10.1,drawingGrid:"A1",instrumentMasterId:instrument.instrumentMasterId,
+        toleranceStandardId:toleranceStandard.toleranceStandardId,tolerancePlus:0.1,lsl:9.9,usl:10.1,drawingGrid:"A1",instrumentMasterId:instrument.instrumentMasterId,
         sampleSize:"1",inspectionFrequency:"EVERY_PART",scCcIdentification:true,
         periodicOperatorRequired:true,finalInspectionRequired:false,
       }]},
@@ -39,6 +40,7 @@ try {
   assert.equal(saved.operations[0].inspectionPlan.cmmRequired, "Y");
   assert.equal(saved.operations[0].inspectionPlan.characteristics[0].patrolQaResult, null);
   assert.equal(saved.operations[0].inspectionPlan.characteristics[0].toleranceGradeText, "CUSTOM-TOL");
+  assert.equal(Number(saved.operations[0].inspectionPlan.characteristics[0].toleranceStandardId), Number(toleranceStandard.toleranceStandardId));
   assert.equal(saved.operations[0].inspectionPlan.characteristics[0].characteristicText, "Surface finish - visual");
   assert.equal(Number(saved.operations[0].inspectionPlan.characteristics[0].lsl), 9.9);
   const sharedDefinitionId = Number(saved.operations[0].processDefinitionId);
@@ -50,7 +52,7 @@ try {
     inspectionPlan:{ planStatus:"READY",cmmRequired:true,characteristics:[{
       sequenceNumber:1,balloonNumber:"B1",characteristicMasterId:null,characteristicText:"Surface finish - visual",
       specifiedDimension:10,toleranceMode:"MANUAL",toleranceGradeId:null,toleranceGradeText:"CUSTOM-TOL",
-      toleranceMinus:0.1,tolerancePlus:0.1,lsl:9.9,usl:10.1,drawingGrid:"A1",
+      toleranceStandardId:toleranceStandard.toleranceStandardId,toleranceMinus:0.1,tolerancePlus:0.1,lsl:9.9,usl:10.1,drawingGrid:"A1",
       instrumentMasterId:instrument.instrumentMasterId,sampleSize:"1",inspectionFrequency:"EVERY_PART",
       scCcIdentification:true,periodicOperatorRequired:true,finalInspectionRequired:true,
     }]},

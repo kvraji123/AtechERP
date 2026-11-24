@@ -6,7 +6,7 @@ export async function dashboardSummary(_req, res) {
 }
 
 export async function listEnquiries(req, res) {
-  const result = await service.listEnquiries(req.query);
+  const result = await service.listEnquiries(req.query, req.user);
 
   return sendSuccess(res, {
     data: result.rows,
@@ -26,7 +26,7 @@ export async function listEnquiryFilterOptions(_req, res) {
 
 export async function getEnquiry(req, res) {
   return sendSuccess(res, {
-    data: await service.getEnquiry(req.params.enquiryId),
+    data: await service.getEnquiry(req.params.enquiryId, req.user),
   });
 }
 
@@ -42,8 +42,8 @@ export async function createEnquiry(req, res) {
     message:
       req.body.action === "SUBMIT"
         ? "Enquiry submitted successfully."
-        : "Enquiry draft saved successfully.",
-    data: await service.createEnquiry(req.body, req.user.userCode),
+        : "Enquiry saved successfully.",
+    data: await service.createEnquiry(req.body, req.user),
   });
 }
 
@@ -52,14 +52,33 @@ export async function updateEnquiry(req, res) {
     message:
       req.body.action === "SUBMIT"
         ? "Enquiry submitted successfully."
-        : "Enquiry draft updated successfully.",
+        : "Enquiry changes saved successfully.",
     data: await service.updateEnquiry(
       req.params.enquiryId,
       req.body,
-      req.user.userCode
+      req.user
     ),
   });
 }
+
+export async function deleteEnquiry(req, res) {
+  await service.deleteEnquiry(req.params.enquiryId, req.user.userCode);
+
+  return sendSuccess(res, {
+    message: "Enquiry deleted successfully.",
+  });
+}
+
+export async function hardDeleteEnquiry(req, res) {
+  const result = await service.hardDeleteEnquiry(req.params.enquiryId, req.user);
+
+  return sendSuccess(res, {
+    message: result.fileCleanupPending
+      ? "Enquiry permanently deleted, but some stored files could not be removed. Contact support to finish file cleanup."
+      : "Inactive enquiry and its enquiry workflow permanently deleted.",
+  });
+}
+
 
 export async function changeEnquiryStatus(req, res) {
   return sendSuccess(res, {
@@ -67,7 +86,7 @@ export async function changeEnquiryStatus(req, res) {
     data: await service.changeEnquiryStatus(
       req.params.enquiryId,
       req.body.enquiryStatus,
-      req.user.userCode
+      req.user
     ),
   });
 }
@@ -77,7 +96,7 @@ export async function submitEnquiry(req, res) {
     message: "Enquiry submitted successfully.",
     data: await service.submitEnquiry(
       req.params.enquiryId,
-      req.user.userCode
+      req.user
     ),
   });
 }

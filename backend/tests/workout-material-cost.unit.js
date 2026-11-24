@@ -24,4 +24,15 @@ for (const materialType of materialTypes) {
   const { materialCostInr, ...legacyLine } = line;
   assert.equal(calculate({ ...base, subparts: [legacyLine] }).materialCost, 30);
 }
+
+const regularPart = {
+  isAssembledPart: false,
+  currencyRate: 2,
+  weightKg: 10,
+  materialRatePerKg: 10,
+  additionalMaterialCostInr: 25,
+};
+assert.equal(calculate(regularPart).materialCost, 125);
+assert.equal(calculate({ ...regularPart, actualMaterialCostInr: '80' }).materialCost, 80);
+assert.equal(calculate({ ...regularPart, actualMaterialCostInr: '80' }).finalPartPrice, 80);
 console.log('Workout material cost checks passed.');

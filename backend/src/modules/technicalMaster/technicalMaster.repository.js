@@ -88,6 +88,49 @@ export async function updateInstrument(connection, instrumentMasterId, data) {
   return result.affectedRows;
 }
 
+export async function listDepartments({ search = "", status = "" } = {}, connection = db) {
+  const [rows] = await connection.execute(`SELECT department_id AS departmentId,
+    department_code AS departmentCode,department_name AS departmentName,
+    display_order AS displayOrder,active_flag AS activeFlag,
+    COALESCE(updated_on,created_on) AS lastUpdated
+    FROM department_master
+    WHERE (?='' OR department_code LIKE ? OR department_name LIKE ?)
+      AND (?='' OR active_flag=?)
+    ORDER BY display_order,department_name,department_id`,
+  [String(search).trim(),like(search),like(search),status,status]);
+  return rows;
+}
+
+export async function findDepartmentConflict(connection, { departmentId = 0, departmentCode, departmentName }) {
+  const [rows] = await connection.execute(`SELECT department_id AS departmentId
+    FROM department_master WHERE department_id<>? AND
+      (UPPER(department_code)=UPPER(?) OR UPPER(department_name)=UPPER(?)) LIMIT 1`,
+  [departmentId,departmentCode,departmentName]);
+  return rows[0] || null;
+}
+
+export async function insertDepartment(connection, data) {
+  const [result] = await connection.execute(`INSERT INTO department_master
+    (department_code,department_name,display_order,active_flag) VALUES (?,?,?,?)`,
+  [data.departmentCode,data.departmentName,data.displayOrder,data.activeFlag]);
+  return result.insertId;
+}
+
+export async function updateDepartment(connection, departmentId, data) {
+  const [result] = await connection.execute(`UPDATE department_master SET department_code=?,
+    department_name=?,display_order=?,active_flag=? WHERE department_id=?`,
+  [data.departmentCode,data.departmentName,data.displayOrder,data.activeFlag,departmentId]);
+  return result.affectedRows;
+}
+
+export async function getActiveDepartmentByName(connection, departmentName) {
+  const [rows] = await connection.execute(`SELECT department_id AS departmentId,
+    department_code AS departmentCode,department_name AS departmentName
+    FROM department_master WHERE active_flag='Y' AND UPPER(department_name)=UPPER(?) LIMIT 1`,
+  [String(departmentName || "").trim()]);
+  return rows[0] || null;
+}
+
 export async function listToleranceGrades({ search = "", status = "" } = {}, connection = db) {
   const [rows] = await connection.execute(`SELECT tolerance_grade_id AS toleranceGradeId,
     grade_code AS gradeCode,basic_size_from AS basicSizeFrom,basic_size_to AS basicSizeTo,
@@ -124,6 +167,73 @@ export async function updateToleranceGrade(connection, toleranceGradeId, data) {
     active_flag=? WHERE tolerance_grade_id=?`,
   [data.gradeCode,data.basicSizeFrom,data.basicSizeTo,data.lowerDeviationMicrons,
     data.upperDeviationMicrons,data.activeFlag,toleranceGradeId]);
+  return result.affectedRows;
+}
+
+export async function listInspectionCharacteristics({ search = "", status = "" } = {}, connection = db) {
+  const [rows] = await connection.execute(`SELECT characteristic_master_id AS characteristicMasterId,
+    characteristic_code AS characteristicCode,characteristic_name AS characteristicName,
+    characteristic_type AS characteristicType,active_flag AS activeFlag
+    FROM inspection_characteristic_master
+    WHERE (?='' OR characteristic_code LIKE ? OR characteristic_name LIKE ?)
+      AND (?='' OR active_flag=?)
+    ORDER BY characteristic_name,characteristic_master_id`,
+  [String(search).trim(),like(search),like(search),status,status]);
+  return rows;
+}
+
+export async function findInspectionCharacteristicConflict(connection, { characteristicMasterId = 0, characteristicCode, characteristicName }) {
+  const [rows] = await connection.execute(`SELECT characteristic_master_id AS characteristicMasterId
+    FROM inspection_characteristic_master WHERE characteristic_master_id<>? AND
+    (UPPER(characteristic_code)=UPPER(?) OR UPPER(characteristic_name)=UPPER(?)) LIMIT 1`,
+  [characteristicMasterId,characteristicCode,characteristicName]);
+  return rows[0] || null;
+}
+
+export async function insertInspectionCharacteristic(connection, data) {
+  const [result] = await connection.execute(`INSERT INTO inspection_characteristic_master
+    (characteristic_code,characteristic_name,characteristic_type,active_flag) VALUES (?,?,?,?)`,
+  [data.characteristicCode,data.characteristicName,data.characteristicType,data.activeFlag]);
+  return result.insertId;
+}
+
+export async function updateInspectionCharacteristic(connection, characteristicMasterId, data) {
+  const [result] = await connection.execute(`UPDATE inspection_characteristic_master SET
+    characteristic_code=?,characteristic_name=?,characteristic_type=?,active_flag=? WHERE characteristic_master_id=?`,
+  [data.characteristicCode,data.characteristicName,data.characteristicType,data.activeFlag,characteristicMasterId]);
+  return result.affectedRows;
+}
+
+export async function listInspectionFrequencies({ search = "", status = "" } = {}, connection = db) {
+  const [rows] = await connection.execute(`SELECT frequency_id AS frequencyId,frequency_code AS frequencyCode,
+    frequency_label AS frequencyLabel,display_order AS displayOrder,active_flag AS activeFlag
+    FROM inspection_frequency_master
+    WHERE (?='' OR frequency_code LIKE ? OR frequency_label LIKE ?)
+      AND (?='' OR active_flag=?)
+    ORDER BY display_order,frequency_label,frequency_id`,
+  [String(search).trim(),like(search),like(search),status,status]);
+  return rows;
+}
+
+export async function findInspectionFrequencyConflict(connection, { frequencyId = 0, frequencyCode, frequencyLabel }) {
+  const [rows] = await connection.execute(`SELECT frequency_id AS frequencyId
+    FROM inspection_frequency_master WHERE frequency_id<>? AND
+    (UPPER(frequency_code)=UPPER(?) OR UPPER(frequency_label)=UPPER(?)) LIMIT 1`,
+  [frequencyId,frequencyCode,frequencyLabel]);
+  return rows[0] || null;
+}
+
+export async function insertInspectionFrequency(connection, data) {
+  const [result] = await connection.execute(`INSERT INTO inspection_frequency_master
+    (frequency_code,frequency_label,display_order,active_flag) VALUES (?,?,?,?)`,
+  [data.frequencyCode,data.frequencyLabel,data.displayOrder,data.activeFlag]);
+  return result.insertId;
+}
+
+export async function updateInspectionFrequency(connection, frequencyId, data) {
+  const [result] = await connection.execute(`UPDATE inspection_frequency_master SET
+    frequency_code=?,frequency_label=?,display_order=?,active_flag=? WHERE frequency_id=?`,
+  [data.frequencyCode,data.frequencyLabel,data.displayOrder,data.activeFlag,frequencyId]);
   return result.affectedRows;
 }
 

@@ -45,7 +45,7 @@ export default function PurchaseEnquiryFilters({
   return (
     <div className="purchase-enquiry-filters">
       <label className="purchase-field">
-        <span>Purchase Enquiry No.</span>
+        <span>RFQ / Purchase Enquiry No.</span>
         <div className="purchase-input-with-icon readonly"><FileSearch size={16} /><input value={enquiryNumber} readOnly /></div>
       </label>
       <label className="purchase-field">
