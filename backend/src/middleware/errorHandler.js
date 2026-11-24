@@ -20,6 +20,10 @@ export function errorHandler(error, _req, res, _next) {
       ? "Part Number already exists in Part Master."
       : duplicateMessage.includes("uq_customer_code")
         ? "Customer Code already exists."
+      : duplicateMessage.includes("uq_customer_purchase_order_customer_reference")
+        ? "This customer PO number already exists for the selected customer."
+        : duplicateMessage.includes("uq_customer_purchase_order_number")
+          ? "Customer PO document number already exists."
         : "A record with the same unique value already exists.";
     return res.status(409).json({
       success: false,

@@ -18,7 +18,6 @@ import feasibilityRoutes from "./modules/feasibility/feasibility.routes.js";
 import workoutRoutes from "./modules/workout/workout.routes.js";
 import quotationRoutes from "./modules/quotation/quotation.routes.js";
 import locationRoutes from "./modules/location/location.routes.js";
-import locationMasterRoutes from "./modules/location-master/location-master.routes.js";
 import itemRoutes from "./modules/item/item.routes.js";
 import referenceRoutes from "./modules/reference/reference.routes.js";
 import machineRoutes from "./modules/machine/machine.routes.js";
@@ -34,21 +33,13 @@ import supplierQuotationRoutes from "./modules/supplier-quotation/supplier-quota
 import quoteComparisonRoutes from "./modules/quotation-comparison/quotation-comparison.routes.js";
 import grnRoutes from "./modules/grn/grn.routes.js";
 import inventoryRoutes from "./modules/inventory/inventory.routes.js";
-import inventoryControlRoutes from "./modules/inventory-control/inventory-control.routes.js";
 import gateEntryRoutes from "./modules/gate-entry/gate-entry.routes.js";
 import attachmentRoutes from "./modules/attachment/attachment.routes.js";
-import materialOutwardRoutes from "./modules/material-outward/material-outward.routes.js";
-import toolingRoutes from "./modules/tooling/tooling.routes.js";
-import inProcessInspectionRoutes from "./modules/in-process-inspection/in-process-inspection.routes.js";
-import authRoutes from "./modules/auth/auth.routes.js";
+import customerPurchaseOrderRoutes from "./modules/customer-po/customer-po.routes.js";
 
 const app = express();
 
 app.disable("x-powered-by");
-
-const onlyOfficeCspSource = env.onlyOffice.enabled
-  ? new URL(env.onlyOffice.documentServerUrl).origin
-  : null;
 
 function isPrivateIpv4(hostname) {
   const octets = hostname.split(".").map(Number);
@@ -81,14 +72,6 @@ function isLocalDevelopmentOrigin(origin) {
 
 app.use(
   helmet({
-    contentSecurityPolicy: onlyOfficeCspSource ? {
-      directives: {
-        // The Document Server API script and its editor iframe are intentionally
-        // the only external browser resources allowed by the ERP page.
-        scriptSrc: ["'self'", onlyOfficeCspSource],
-        frameSrc: ["'self'", onlyOfficeCspSource],
-      },
-    } : undefined,
     crossOriginResourcePolicy: {
       policy: "cross-origin",
     },
@@ -132,11 +115,9 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api/v1/customers", customerRoutes);
-app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/suppliers", supplierRoutes);
 app.use("/api/v1/parts", partRoutes);
 app.use("/api/v1/locations", locationRoutes);
-app.use("/api/v1/location-masters", locationMasterRoutes);
 app.use("/api/v1/items", itemRoutes);
 app.use("/api/v1/machines", machineRoutes);
 app.use("/api/v1/gauges", gaugeRoutes);
@@ -156,12 +137,9 @@ app.use("/api/v1/purchase-supplier-quotations", supplierQuotationRoutes);
 app.use("/api/v1/purchase-quote-comparisons", quoteComparisonRoutes);
 app.use("/api/v1/purchase-grns", grnRoutes);
 app.use("/api/v1/inventory", inventoryRoutes);
-app.use("/api/v1/inventory/control", inventoryControlRoutes);
 app.use("/api/v1/purchase-gate-entries", gateEntryRoutes);
-app.use("/api/v1/material-outward", materialOutwardRoutes);
-app.use("/api/v1/tooling", toolingRoutes);
-app.use("/api/v1/in-process-inspection", inProcessInspectionRoutes);
 app.use("/api/v1/attachments", attachmentRoutes);
+app.use("/api/v1/customer-purchase-orders", customerPurchaseOrderRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
